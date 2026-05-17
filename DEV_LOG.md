@@ -25,7 +25,7 @@
 | 2026-05-18 | 1.6 | Timeline (tracks, clips, ruler, playhead, snap) | ✅ |
 | 2026-05-18 | 1.7 | Overlays + Collab simulator + shortcuts | ✅ |
 | 2026-05-18 | 1.8 | Vitest + tests + frontend/DESIGN.md | ✅ |
-| — | 2 | Database schema + migrations + seed | ⏳ |
+| 2026-05-18 | 2 | Database schema + migrations + seed | ✅ |
 | — | 3 | Backend API (Axum + auth) | ⏳ |
 | — | 4 | Worker + ffmpeg pipelines | ⏳ |
 | — | 5 | Pusher collaboration | ⏳ |
@@ -541,6 +541,63 @@ Timeline ฉบับเต็ม — track headers + adaptive ruler + clips ท
 | **Total** | **frontend full** | **~5,350** | **321 KB JS / 99 KB gz** |
 
 **Rules unlocked by end of Phase 1:** #7 (TS strict) · #8 (shadcn only) · #9 (no other UI fw) · #10 (tests) · #11 (README) · #12 (frontend/DESIGN.md เต็ม) · #13 (.env.example). Rules ที่เหลือ (#1–#6 = Rust + ffmpeg + migrations) จะ unlock ใน Phase 2–4.
+
+---
+
+## 🗄️ Phase 2 — Database schema + migrations + seed
+
+**Date:** 2026-05-18 · **Status:** ✅
+
+### Goal
+สร้าง PostgreSQL schema ที่รองรับทุก entity ของ CloudCut, indexes พร้อม rationale,
+seed data สำหรับ dev environment และ `docs/database-design.md` ตอบ §1.4 (8 ข้อ) ครบ
+
+### What was done
+- `backend/migrations/0001_init.sql` — enums + 15 tables พร้อม triggers `set_updated_at()`
+- `backend/migrations/0002_indexes.sql` — 18 indexes พร้อม inline rationale ทุกตัว
+- `backend/migrations/0003_seed.sql` — 2 users, 1 workspace, 1 project, 4 tracks, 3 assets, 3 clips
+- `docs/database-design.md` ตอบ 8 คำถามใน §1.4 ครบ:
+  - Q1: UUID PK (client-side gen + enum safety)
+  - Q2: hard delete + `ON DELETE CASCADE/SET NULL` strategy
+  - Q3: normalised `clip_effects` vs JSONB — เลือก normalised เพราะ filter บน `type`/`enabled`
+  - Q4: range partition `operation_logs` รายเดือน + pg_cron maintenance plan
+  - Q5: index philosophy (covering index + partial index)
+  - Q6: FPS/resolution project-level only
+  - Q7: S3 key convention (`originals/`, `variants/`, `exports/`)
+  - Q8: operation-log append (แทน CRDT/OT) — last-writer-wins per clip
+
+### Decisions
+
+| # | Decision | เหตุผล |
+|---|----------|--------|
+| **D-032** | `operation_logs` ใช้ BIGSERIAL id (ไม่ใช่ UUID) | append-only high-throughput — sequential id compress ดีกว่าใน B-tree partition |
+| **D-033** | `operation_logs` ไม่มี FK ไปยัง `projects` | cross-partition FK scan ช้า — enforce ที่ application layer ใน Axum handler แทน |
+| **D-034** | Seed guard: `0003_seed.sql` รันเฉพาะเมื่อ `CLOUDCUT_SEED_DATA=true` | กัน seed data หลุดเข้า production โดยไม่ได้ตั้งใจ |
+| **D-035** | `invitations.token` เป็น `DEFAULT encode(gen_random_bytes(32), 'hex')` | 32 bytes = 256-bit entropy — ไม่ต้องส่ง token จาก application layer ให้ DB gen เอง |
+| **D-036** | `clip_effects` เก็บ `position` (smallint) สำหรับ render order | ffmpeg filter-graph ต้องการ order ที่แน่นอน — JSONB array ทำได้แต่ query/update ยุ่งยากกว่า |
+
+### Verification
+
+```bash
+# รัน migrations บน dev Postgres
+docker compose up -d
+sqlx migrate run --database-url "postgresql://cloudcut:cloudcut_dev@localhost:5432/cloudcut"
+
+# ตรวจสอบ tables
+psql -U cloudcut cloudcut -c "\dt"
+# → ควรเห็น 15 tables + partition tables operation_logs_2026_*
+
+# Seed data
+CLOUDCUT_SEED_DATA=true sqlx migrate run ...
+psql -U cloudcut cloudcut -c "SELECT email, display_name FROM users"
+# → alice@cloudcut.dev, mira@cloudcut.dev
+```
+
+### Rules unlocked
+- ✅ **Rule #4** — migrations directory พร้อม (`backend/migrations/0001..0003`)
+- ✅ **Rule #12** — `docs/database-design.md` เต็ม (Phase 2 section)
+
+---
 
 ## 📝 How to update this log
 

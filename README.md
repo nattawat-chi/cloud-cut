@@ -2,7 +2,7 @@
 
 Collaborative video editor SaaS — Rust backend + React 19 frontend.
 
-> **Status:** Phase 0 (monorepo + Docker scaffold) + Phase 1.1 (frontend foundation) complete. Phases 1.2–5 land iteratively. See [Implementation phases](#implementation-phases) and [DEV_LOG.md](DEV_LOG.md) for the running journal of decisions and gotchas.
+> **Status:** Phase 0–2 complete (monorepo + Docker + full frontend UI + PostgreSQL schema). Phases 3–5 (Rust API / worker / Pusher) next. See [Implementation phases](#implementation-phases) and [DEV_LOG.md](DEV_LOG.md) for the running journal.
 
 ---
 
@@ -119,9 +119,9 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
 | Phase | Scope | Status |
 |------:|-------|--------|
-| **0** | Monorepo + Cargo workspace + Docker compose (this commit) | ✅ Done |
-| 1 | Frontend foundation (Vite + React 19 + TS strict + Tailwind + shadcn) | ⏳ Next |
-| 2 | PostgreSQL schema + migrations + seed (`backend/migrations/`) | ⏳ |
+| **0** | Monorepo + Cargo workspace + Docker compose | ✅ Done |
+| 1 | Frontend foundation + all UI phases (1.1–1.8) | ✅ Done |
+| 2 | PostgreSQL schema + migrations + seed (`backend/migrations/`) | ✅ Done |
 | 3 | Backend API: auth, projects, timeline, assets, exports | ⏳ |
 | 4 | Worker: Redis Streams + ffmpeg pipelines (metadata / proxy / thumbnails / waveform / export) | ⏳ |
 | 5 | Pusher integration: presence + operation sync | ⏳ |
