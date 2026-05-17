@@ -2,7 +2,7 @@ pub mod handlers;
 pub mod models;
 
 use axum::{
-    routing::{delete, get, patch, post},
+    routing::{get, patch, post},
     Router,
 };
 

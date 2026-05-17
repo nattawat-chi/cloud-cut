@@ -12,6 +12,7 @@ use crate::{auth::jwt::decode_access_token, error::AppError, state::AppState};
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub user_id: Uuid,
+    #[allow(dead_code)] // used by Pusher presence handlers in Phase 5
     pub email: String,
 }
 
