@@ -1,0 +1,17 @@
+# =============================================================================
+# CloudCut frontend — dev image.
+# Source is bind-mounted at runtime so edits trigger Vite HMR.
+# =============================================================================
+FROM node:24-alpine
+WORKDIR /app
+
+# Enable corepack so the project-pinned pnpm version is honoured.
+RUN corepack enable
+
+# Copy lockfile + manifest first to maximise layer caching.
+COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install --frozen-lockfile || pnpm install
+
+# Real sources arrive via bind mount declared in docker-compose.full.yml.
+EXPOSE 5173
+CMD ["pnpm", "dev", "--host", "0.0.0.0"]

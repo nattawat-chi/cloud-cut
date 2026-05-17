@@ -1,0 +1,28 @@
+# =============================================================================
+# CloudCut backend — dev image with cargo-watch.
+# Source is bind-mounted at runtime so edits trigger an auto-rebuild.
+# =============================================================================
+FROM rust:1.83-slim-bookworm
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# cargo-watch keeps the dev loop tight. sqlx-cli is handy for migrations.
+RUN cargo install cargo-watch --locked \
+    && cargo install sqlx-cli --no-default-features --features rustls,postgres --locked
+
+# Warm dependency cache with workspace manifests + stub sources.
+COPY Cargo.toml Cargo.lock* ./
+COPY backend/Cargo.toml backend/
+COPY worker/Cargo.toml worker/
+RUN mkdir -p backend/src worker/src \
+    && echo 'fn main() {}' > backend/src/main.rs \
+    && echo 'fn main() {}' > worker/src/main.rs \
+    && cargo build -p backend \
+    && rm -rf backend/src worker/src
+
+EXPOSE 8080
+# Real sources arrive via bind mount declared in docker-compose.full.yml.
+CMD ["cargo", "watch", "-q", "-c", "-w", "backend/src", "-w", "backend/Cargo.toml", "-x", "run -p backend"]

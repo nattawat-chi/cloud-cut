@@ -1,0 +1,84 @@
+# =============================================================================
+# CloudCut — infrastructure-only compose
+#
+# Default for dev: spins up Postgres + Redis + MinIO so Rust/frontend can run
+# natively on the host with fast iteration.
+#
+# Override with docker-compose.full.yml to also containerize backend/worker/
+# frontend, or use docker-compose.prod.yml for production-style multi-stage
+# builds.
+# =============================================================================
+name: cloudcut
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cloudcut-postgres
+    environment:
+      POSTGRES_USER: cloudcut
+      POSTGRES_PASSWORD: cloudcut_dev
+      POSTGRES_DB: cloudcut
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # init.sql runs once on a fresh data volume — it installs extensions.
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cloudcut -d cloudcut"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: cloudcut-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: cloudcut-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: cloudcut
+      MINIO_ROOT_PASSWORD: cloudcut_dev_secret
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      # `mc ready local` is the canonical readiness probe for MinIO ≥ RELEASE.2023.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # One-shot job: create the `cloudcut-assets` bucket once MinIO is up.
+  minio-setup:
+    image: minio/mc:latest
+    container_name: cloudcut-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/setup.sh"]
+    volumes:
+      - ./docker/minio/setup.sh:/scripts/setup.sh:ro
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

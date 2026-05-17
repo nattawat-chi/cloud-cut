@@ -1,0 +1,22 @@
+# =============================================================================
+# CloudCut worker — dev image. Includes ffmpeg + cargo-watch.
+# =============================================================================
+FROM rust:1.83-slim-bookworm
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev ca-certificates ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN cargo install cargo-watch --locked
+
+COPY Cargo.toml Cargo.lock* ./
+COPY backend/Cargo.toml backend/
+COPY worker/Cargo.toml worker/
+RUN mkdir -p backend/src worker/src \
+    && echo 'fn main() {}' > backend/src/main.rs \
+    && echo 'fn main() {}' > worker/src/main.rs \
+    && cargo build -p worker \
+    && rm -rf backend/src worker/src
+
+CMD ["cargo", "watch", "-q", "-c", "-w", "worker/src", "-w", "worker/Cargo.toml", "-x", "run -p worker"]

@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = ["backend", "worker"]
+
+# Workspace-shared dependency pins.
+# Crate-specific crates (axum, redis, jsonwebtoken, …) stay in their own Cargo.toml.
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json", "migrate"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "2"
+anyhow = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.dev]
+# Faster recompiles for the inner dev loop; release profile keeps the optimizations.
+opt-level = 0
+debug = 1

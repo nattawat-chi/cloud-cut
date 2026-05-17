@@ -1,0 +1,33 @@
+# Anything excluded here is skipped from `docker build` contexts.
+# Keep build context lean to avoid slow uploads + cache invalidation.
+
+# ---- Rust build artifacts --------------------------------------------------
+target/
+**/target/
+*.rs.bk
+
+# ---- Node ------------------------------------------------------------------
+node_modules/
+**/node_modules/
+.pnpm-store/
+dist/
+.vite/
+
+# ---- VCS / IDE -------------------------------------------------------------
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# ---- Env / secrets ---------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---- Docs / prototype (not needed inside containers) -----------------------
+docs/
+README.md
+
+# ---- OS --------------------------------------------------------------------
+.DS_Store
+Thumbs.db

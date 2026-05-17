@@ -1,0 +1,49 @@
+[package]
+name = "backend"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "backend"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace pins
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# HTTP server
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "util"] }
+
+# Redis (Phase 3+: queue producer)
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Auth
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+# Validation
+validator = { version = "0.18", features = ["derive"] }
+
+# OpenAPI
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
+
+# Misc
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+dotenvy = "0.15"
+
+[dev-dependencies]
+tokio = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

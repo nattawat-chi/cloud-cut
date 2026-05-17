@@ -1,0 +1,299 @@
+/* =============================================================================
+   CloudCut — global styles
+   Tailwind v4 single-import + the full CloudCut design palette ported from
+   docs/prototype/src/styles.css. Two layers of variables:
+     1. Functional tokens   (--bg-0, --text-1, --clip-v-1, --row-h, …) — used
+        directly by editor-specific components (timeline, clip, ruler).
+     2. shadcn semantic tokens (--background, --foreground, --primary, …) —
+        mapped from the functional layer so shadcn/ui primitives inherit the
+        editor theme without extra config.
+   ============================================================================= */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* `data-theme="dark"` on <html> turns on every `dark:*` utility. The same
+   attribute also drives the functional variables below. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   1. Functional palette
+   ───────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root,
+  [data-theme="light"] {
+    /* Surface scale — light mode is warm off-white */
+    --bg-0:      oklch(0.965 0.004 90);   /* outermost canvas */
+    --bg-1:      oklch(0.985 0.003 90);   /* panels */
+    --bg-2:      oklch(0.995 0.002 90);   /* lifted: ruler, headers */
+    --bg-3:      oklch(0.945 0.005 90);   /* inputs, hover */
+    --bg-4:      oklch(0.91  0.006 90);
+    --line:      oklch(0.88  0.006 90);
+    --line-soft: oklch(0.92  0.005 90);
+    --text-1:    oklch(0.18  0.010 260);
+    --text-2:    oklch(0.38  0.010 260);
+    --text-3:    oklch(0.55  0.010 260);
+    --text-4:    oklch(0.68  0.010 260);
+
+    --clip-v-1:  oklch(0.78 0.10 230);
+    --clip-v-2:  oklch(0.78 0.10 295);
+    --clip-a-1:  oklch(0.82 0.10 60);
+    --clip-a-2:  oklch(0.78 0.10 350);
+
+    --danger:    oklch(0.62 0.20 25);
+    --warn:      oklch(0.72 0.17 75);
+    --ok:        oklch(0.68 0.16 165);
+
+    color-scheme: light;
+  }
+
+  [data-theme="dark"] {
+    --bg-0:      oklch(0.16 0.008 260);   /* cool blue-black */
+    --bg-1:      oklch(0.19 0.009 260);
+    --bg-2:      oklch(0.22 0.010 260);
+    --bg-3:      oklch(0.26 0.011 260);
+    --bg-4:      oklch(0.31 0.012 260);
+    --line:      oklch(0.30 0.010 260);
+    --line-soft: oklch(0.25 0.009 260);
+    --text-1:    oklch(0.97 0.004 260);
+    --text-2:    oklch(0.74 0.008 260);
+    --text-3:    oklch(0.55 0.010 260);
+    --text-4:    oklch(0.42 0.010 260);
+
+    --clip-v-1:  oklch(0.55 0.13 230);
+    --clip-v-2:  oklch(0.58 0.14 295);
+    --clip-a-1:  oklch(0.62 0.13 60);
+    --clip-a-2:  oklch(0.55 0.12 350);
+
+    --danger:    oklch(0.68 0.20 25);
+    --warn:      oklch(0.78 0.17 75);
+    --ok:        oklch(0.78 0.16 165);
+
+    color-scheme: dark;
+  }
+
+  /* Accent + collab swatches + dimensions live outside the theme blocks because
+     they are theme-agnostic. The accent is mutated at runtime by the Tweaks
+     panel (Phase 1.7). */
+  :root {
+    --accent:      oklch(0.82 0.16 165);
+    --accent-ink:  oklch(0.18 0.06 165);
+    --accent-soft: oklch(0.82 0.16 165 / 0.16);
+
+    --collab-1: oklch(0.74 0.16 30);
+    --collab-2: oklch(0.72 0.16 280);
+    --collab-3: oklch(0.78 0.14 130);
+
+    --row-h:    60px;
+    --ruler-h:  28px;
+    --header-w: 168px;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   2. shadcn semantic mapping — derive shadcn tokens from the functional layer.
+   ───────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root,
+  [data-theme="light"],
+  [data-theme="dark"] {
+    --background:            var(--bg-0);
+    --foreground:            var(--text-1);
+    --card:                  var(--bg-1);
+    --card-foreground:       var(--text-1);
+    --popover:               var(--bg-1);
+    --popover-foreground:    var(--text-1);
+    --primary:               var(--text-1);
+    --primary-foreground:    var(--bg-1);
+    --secondary:             var(--bg-3);
+    --secondary-foreground:  var(--text-1);
+    --muted:                 var(--bg-2);
+    --muted-foreground:      var(--text-2);
+    --destructive:           var(--danger);
+    --border:                var(--line);
+    --input:                 var(--bg-3);
+    --ring:                  var(--accent);
+    --radius:                0.375rem;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   3. Tailwind @theme — expose variables as utility classes.
+   `bg-surface-1`, `text-text-3`, `border-line-soft`, `bg-clip-v-1`, …
+   ───────────────────────────────────────────────────────────────────────────── */
+@theme inline {
+  /* shadcn semantic colors — consumed by shadcn/ui primitives. */
+  --color-background:           var(--background);
+  --color-foreground:           var(--foreground);
+  --color-card:                 var(--card);
+  --color-card-foreground:      var(--card-foreground);
+  --color-popover:              var(--popover);
+  --color-popover-foreground:   var(--popover-foreground);
+  --color-primary:              var(--primary);
+  --color-primary-foreground:   var(--primary-foreground);
+  --color-secondary:            var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted:                var(--muted);
+  --color-muted-foreground:     var(--muted-foreground);
+  --color-accent:               var(--accent);
+  --color-accent-foreground:    var(--accent-ink);
+  --color-destructive:          var(--destructive);
+  --color-border:               var(--border);
+  --color-input:                var(--input);
+  --color-ring:                 var(--ring);
+
+  /* CloudCut surface scale */
+  --color-surface-0:    var(--bg-0);
+  --color-surface-1:    var(--bg-1);
+  --color-surface-2:    var(--bg-2);
+  --color-surface-3:    var(--bg-3);
+  --color-surface-4:    var(--bg-4);
+  --color-line:         var(--line);
+  --color-line-soft:    var(--line-soft);
+  --color-text-1:       var(--text-1);
+  --color-text-2:       var(--text-2);
+  --color-text-3:       var(--text-3);
+  --color-text-4:       var(--text-4);
+
+  /* Track / clip colors (used by timeline) */
+  --color-clip-v-1:     var(--clip-v-1);
+  --color-clip-v-2:     var(--clip-v-2);
+  --color-clip-a-1:     var(--clip-a-1);
+  --color-clip-a-2:     var(--clip-a-2);
+
+  /* Collab + status */
+  --color-collab-1:     var(--collab-1);
+  --color-collab-2:     var(--collab-2);
+  --color-collab-3:     var(--collab-3);
+  --color-status-danger: var(--danger);
+  --color-status-warn:  var(--warn);
+  --color-status-ok:    var(--ok);
+  --color-accent-soft:  var(--accent-soft);
+
+  /* Radius scale (matches shadcn defaults) */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Fonts */
+  --font-sans: "Geist", -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  /* Editor-specific keyframes registered as Tailwind utilities:
+     `animate-cc-presence-pulse` rings around a collaborator avatar while they
+     edit; `animate-cc-spinner` is the asset-processing spinner. */
+  --animate-cc-presence-pulse: cc-presence-pulse 1.8s ease-out infinite;
+  --animate-cc-spinner: cc-spinner 0.8s linear infinite;
+  --animate-cc-toast-in: cc-toast-in 0.2s ease-out;
+}
+
+@keyframes cc-presence-pulse {
+  0%   { transform: scale(0.9); opacity: 1; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+@keyframes cc-spinner {
+  to { transform: rotate(360deg); }
+}
+@keyframes cc-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   4. Element baselines
+   ───────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  *  { border-color: var(--border); }
+  html, body, #root { height: 100%; margin: 0; }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  /* Mono utility — used for timecodes, clip names, technical readouts. */
+  .font-mono {
+    font-family: var(--font-mono);
+    font-feature-settings: "ss01";
+  }
+
+  /* Slider thumb styling for inspector + volume slider.
+     Default browser thumbs are oversized for our 4px tracks; this gives a
+     pill-thumb shaped like the prototype's `.insp-slider::-webkit-slider-thumb`. */
+  .cc-insp-slider::-webkit-slider-thumb,
+  .cc-volume::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg-1);
+    cursor: pointer;
+  }
+  .cc-insp-slider::-moz-range-thumb,
+  .cc-volume::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg-1);
+    cursor: pointer;
+  }
+
+  /* Timeline ruler ticks. Keeping these as a vanilla CSS class because
+     they're emitted hundreds of times per render — Tailwind utilities would
+     bloat the markup. */
+  .cc-tick {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    padding: 6px 0 0 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-3);
+    border-left: 1px solid var(--line);
+  }
+  .cc-tick-minor {
+    border-left-color: var(--line-soft);
+    color: transparent;
+    height: 5px;
+    top: auto;
+    bottom: 0;
+    padding: 0;
+  }
+
+  /* Timeline track row — repeating vertical gridlines tied to the current
+     ruler step via the `--major-px` CSS variable set by Timeline at render. */
+  .cc-row-grid {
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent calc(var(--major-px, 100px) - 1px),
+      var(--line-soft) calc(var(--major-px, 100px) - 1px),
+      var(--line-soft) var(--major-px, 100px)
+    );
+  }
+
+  /* Reveal trim handles on hover or when the clip is selected. */
+  .cc-clip:hover .cc-trim-handle,
+  .cc-clip-selected .cc-trim-handle {
+    opacity: 1;
+  }
+  .cc-clip-selected {
+    outline: 2px solid var(--accent);
+    box-shadow:
+      0 0 0 1px var(--bg-0),
+      0 0 18px color-mix(in oklch, var(--accent) 40%, transparent);
+    z-index: 4;
+  }
+  .cc-clip.cc-clip-dragging {
+    opacity: 0.7;
+    cursor: grabbing;
+    z-index: 10;
+  }
+}

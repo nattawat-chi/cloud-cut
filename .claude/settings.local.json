@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(ls /c/Users/Cobalt/.claude/projects/C--Users-Cobalt-Desktop-new-projects-cloud-cut-readiness-test/8a235717-d311-4302-b863-b7706da42ed1/tool-results/)",
+      "Bash(chmod +x docker/minio/setup.sh)",
+      "Bash(docker compose *)",
+      "Bash(docker run *)",
+      "Bash(pnpm --version)",
+      "Bash(npm --version)",
+      "Bash(corepack enable *)",
+      "Bash(corepack prepare *)",
+      "Bash(npm install *)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm approve-builds *)",
+      "Bash(pnpm typecheck *)",
+      "Bash(pnpm build *)",
+      "Bash(pnpm dev *)",
+      "Bash(kill %1)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s http://localhost:5173/src/components/ui/resizable.tsx)",
+      "Bash(gh --version)",
+      "Bash(gh auth *)",
+      "Bash(git init *)",
+      "Bash(git config *)"
+    ]
+  }
+}
