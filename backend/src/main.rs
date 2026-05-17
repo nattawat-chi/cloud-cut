@@ -1,38 +1,92 @@
-//! CloudCut backend — Phase 0 placeholder.
+//! CloudCut backend — Axum HTTP server.
 //!
-//! Real router, auth, and DB pool land in Phase 3. This binary only proves that
-//! `cargo run -p backend` succeeds (Rule 2) and that env wiring is reachable.
+//! Start: `cargo run -p backend`
+//! Env:   copy `.env.example` to `.env` and fill in secrets.
+
+mod assets;
+mod auth;
+mod config;
+mod error;
+mod exports;
+mod projects;
+mod state;
+mod timeline;
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
+use axum::{
+    http::{header, Method},
+    response::Json,
+    routing::get,
+    Router,
+};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    trace::TraceLayer,
+};
 use tracing::info;
+
+use config::Config;
+use state::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // .env is optional — production reads real env vars directly.
     let _ = dotenvy::dotenv();
 
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "backend=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "backend=debug,tower_http=info,sqlx=warn".into()),
         )
         .init();
 
-    let host = std::env::var("BACKEND_HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port: u16 = std::env::var("BACKEND_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8080);
-    let addr: SocketAddr = format!("{host}:{port}").parse()?;
+    let config = Config::from_env()?;
+    let addr: SocketAddr = format!("{}:{}", config.backend_host, config.backend_port).parse()?;
 
-    info!("CloudCut backend — Phase 0 placeholder");
-    info!("Would bind to {addr} (Phase 3 will start the Axum router here).");
-    info!(
-        "DATABASE_URL set: {}",
-        std::env::var("DATABASE_URL").is_ok()
-    );
-    info!("REDIS_URL set:    {}", std::env::var("REDIS_URL").is_ok());
+    info!("connecting to database…");
+    let state = AppState::new(config).await?;
+    info!("database connected ✓");
 
+    let app = build_router(state);
+
+    info!("CloudCut backend listening on http://{addr}");
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
     Ok(())
+}
+
+pub fn build_router(state: AppState) -> Router {
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .max_age(Duration::from_secs(3600));
+
+    let api = Router::new()
+        .route("/health", get(health))
+        .nest("/auth", auth::router())
+        .merge(projects::router())
+        .merge(timeline::router())
+        .merge(assets::router())
+        .merge(exports::router());
+
+    Router::new()
+        .nest("/api/v1", api)
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
+        .with_state(state)
+}
+
+async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
 }

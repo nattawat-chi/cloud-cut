@@ -26,7 +26,7 @@
 | 2026-05-18 | 1.7 | Overlays + Collab simulator + shortcuts | ✅ |
 | 2026-05-18 | 1.8 | Vitest + tests + frontend/DESIGN.md | ✅ |
 | 2026-05-18 | 2 | Database schema + migrations + seed | ✅ |
-| — | 3 | Backend API (Axum + auth) | ⏳ |
+| 2026-05-18 | 3 | Backend API (Axum + auth) | ✅ |
 | — | 4 | Worker + ffmpeg pipelines | ⏳ |
 | — | 5 | Pusher collaboration | ⏳ |
 

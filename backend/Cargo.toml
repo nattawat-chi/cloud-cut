@@ -25,13 +25,24 @@ anyhow = { workspace = true }
 axum = { version = "0.7", features = ["macros"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "util"] }
+async-trait = "0.1"
 
-# Redis (Phase 3+: queue producer)
+# Redis (queue producer for export jobs)
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 # Auth
 jsonwebtoken = "9"
 argon2 = "0.5"
+
+# S3 presigned upload URLs (MinIO-compatible via endpoint_url + force_path_style)
+aws-sdk-s3 = "1"
+aws-credential-types = { version = "1", features = ["hardcoded-credentials"] }
+
+# Crypto helpers for refresh tokens + cursor pagination
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
 
 # Validation
 validator = { version = "0.18", features = ["derive"] }
@@ -41,7 +52,7 @@ utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
 utoipa-swagger-ui = { version = "8", features = ["axum"] }
 
 # Misc
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dotenvy = "0.15"
 
 [dev-dependencies]
