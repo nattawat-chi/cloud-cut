@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { MOCK_ASSET_INDEX } from '@/mocks/cloudcut';
+import { MOCK_ASSET_INDEX as MOCK_ASSET_INDEX_FALLBACK } from '@/mocks/cloudcut';
+import { useAssetsStore } from '@/state/assetsStore';
 import { useCollabStore } from '@/state/collabStore';
 import { useHistoryStore } from '@/state/historyStore';
 import { usePlaybackStore } from '@/state/playbackStore';
@@ -192,9 +193,14 @@ export function Timeline() {
     e.preventDefault();
     const assetId = e.dataTransfer.getData('application/x-cloudcut-asset');
     if (!assetId) return;
-    const asset = MOCK_ASSET_INDEX[assetId];
-    if (!asset || asset.durMs == null) return;
-    // Reject incompatible drops: image → audio, audio → video, etc.
+    // Lookup goes through the live store (real assets from the backend) —
+    // the mock index is only seeded when projectStore.loadMockProject() runs.
+    const asset =
+      useAssetsStore.getState().byId[assetId] ?? MOCK_ASSET_INDEX_FALLBACK[assetId];
+    if (!asset) return;
+    // Images don't have a duration — default to 4s on the timeline.
+    const durMs = asset.durMs ?? 4000;
+    // Reject incompatible drops: audio asset → video track, etc.
     const compat =
       (track.type === 'video' && asset.type !== 'audio') ||
       (track.type === 'audio' && asset.type === 'audio');
@@ -209,7 +215,7 @@ export function Timeline() {
       trackId: track.id,
       assetId: asset.id,
       posMs: dropMs,
-      durMs: asset.durMs,
+      durMs,
       name: asset.name,
       thumbs: asset.thumb ? [asset.thumb] : undefined,
     });

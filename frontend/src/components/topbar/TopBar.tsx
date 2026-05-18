@@ -223,12 +223,25 @@ function UserMenu() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  // The dropdown is positioned with `fixed` coordinates derived from the
+  // button's bounding rect because <header> has `overflow-hidden`, which
+  // would clip an `absolute` child.
+  const [pos, setPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    // Compute position relative to the viewport
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) {
+      setPos({ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) });
+    }
     const onDocClick = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!buttonRef.current?.contains(t) && !menuRef.current?.contains(t)) {
+        setOpen(false);
+      }
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
@@ -245,8 +258,9 @@ function UserMenu() {
     .toUpperCase();
 
   return (
-    <div ref={rootRef} className="relative">
+    <>
       <button
+        ref={buttonRef}
         type="button"
         title={user.email}
         onClick={() => setOpen((o) => !o)}
@@ -260,10 +274,13 @@ function UserMenu() {
       </button>
       {open && (
         <div
+          ref={menuRef}
+          // z-[60] keeps us above the header (z-30) AND the resizable panels.
           className={cn(
-            'absolute right-0 top-9 z-40 w-56 overflow-hidden rounded-md border border-line',
+            'fixed z-[60] w-56 overflow-hidden rounded-md border border-line',
             'bg-surface-2 py-1 shadow-lg',
           )}
+          style={{ top: pos.top, right: pos.right }}
         >
           <div className="px-3 py-2">
             <div className="truncate text-xs font-medium text-text-1">
@@ -287,6 +304,6 @@ function UserMenu() {
           </button>
         </div>
       )}
-    </div>
+    </>
   );
 }
