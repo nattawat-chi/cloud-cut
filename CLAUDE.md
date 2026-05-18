@@ -148,6 +148,9 @@ architecture choices.
 | **MOCK-LEAKAGE** | After hydrate, `MOCK_ASSET_INDEX[uuid]` is undefined | Look up via `useAssetsStore.byId[id]`, mock as fallback only |
 | **TRACK-ID-DRIFT** | `clipAtTime` hard-coded `tr_v1/tr_v2` mock ids | Pass `tracks` argument, walk by array index (later = on top) |
 | **WORKSPACE-LABEL** | `project.workspace` field is the workspace_id UUID, not name | Don't show it as a label; AssetBrowser hydration regex-checks it's a UUID before calling API |
+| **SPLIT-MIN-DUR** | Split clip → 409 `clips_dur_ms_check violation` | Postgres CHECK is `dur_ms >= 400`. Frontend split guard + backend `split_clip` must use **400** (not 200) so both halves can pass the check |
+| **SPLIT-ROLLBACK** | Failed split leaves orphan `c-tmp_*` clips in local state | `.catch()` calls `useProjectStore.getState().undoLocal()` to pop the snapshot pushed at split start |
+| **SPLIT-NO-PEER-SYNC** | Window A splits, window B sees nothing | Backend publishes `clip:split` not `clip:updated`. CollabClient must bind `clip:split` and run both halves through `applyRemoteClipUpsert` |
 
 When you see a familiar symptom, search this table first.
 
