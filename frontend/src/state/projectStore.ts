@@ -466,5 +466,12 @@ export const selectCanRedo = (s: ProjectState): boolean => s._redoStack.length >
 export const selectClipById = (id: UUID) => (s: ProjectState): Clip | undefined =>
   s.clips.find((c) => c.id === id);
 
+// React's useSyncExternalStore (used by Zustand) requires the selector to
+// return *stable* references when nothing changed — otherwise it re-renders
+// on every snapshot check and throws "Maximum update depth exceeded".
+// Share a single empty-array constant for the "no effects on this clip"
+// fallback so the reference stays identical across renders.
+const EMPTY_EFFECTS: readonly ClipEffect[] = Object.freeze([]);
+
 export const selectEffectsForClip = (id: UUID) => (s: ProjectState): readonly ClipEffect[] =>
-  s.effects[id] ?? [];
+  s.effects[id] ?? EMPTY_EFFECTS;
