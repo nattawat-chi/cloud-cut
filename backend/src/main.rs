@@ -11,6 +11,7 @@ mod models;
 mod projects;
 mod rate_limit;
 mod state;
+mod timeline;
 mod workspaces;
 
 use std::{net::SocketAddr, sync::Arc};

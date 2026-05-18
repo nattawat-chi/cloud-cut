@@ -13,6 +13,7 @@ pub fn build(state: AppState) -> Router {
         // is matched as a static segment before the dynamic :subresource routes.
         .merge(crate::collaboration::router())
         .merge(crate::projects::router())
+        .merge(crate::timeline::router())
         .merge(crate::assets::router())
         .merge(crate::exports::router());
 
