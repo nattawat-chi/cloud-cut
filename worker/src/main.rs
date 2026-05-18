@@ -1,11 +1,19 @@
-//! CloudCut worker — Phase 0 placeholder.
+//! CloudCut worker — Redis Streams consumer + ffmpeg pipelines.
 //!
-//! Real Redis Streams consumer + ffmpeg pipelines land in Phase 4. This binary
-//! only proves that `cargo run -p worker` succeeds (Rule 3) and that ffmpeg is
-//! reachable on PATH (worker container ships ffmpeg pre-installed).
+//! Layout follows spec §3.11 — each module is currently a scaffold; Phase 4
+//! wires them into a live consumer loop.
+
+mod asset_pipeline;
+mod cleanup;
+mod error;
+mod export_pipeline;
+mod ffmpeg;
+mod processor;
+mod progress;
+mod queue;
+mod storage;
 
 use std::process::Command;
-
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -19,13 +27,14 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    info!("CloudCut worker — Phase 0 placeholder");
+    info!("CloudCut worker — scaffold (Phase 4 wires the consumer loop)");
     info!(
         "DATABASE_URL set: {}",
         std::env::var("DATABASE_URL").is_ok()
     );
     info!("REDIS_URL set:    {}", std::env::var("REDIS_URL").is_ok());
 
+    // Verify ffmpeg is on PATH — the worker container ships it pre-installed.
     match Command::new("ffmpeg").arg("-version").output() {
         Ok(out) if out.status.success() => {
             let first_line = String::from_utf8_lossy(&out.stdout)
@@ -42,5 +51,18 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => warn!("ffmpeg not on PATH (will be required in Phase 4): {e}"),
     }
 
+    // ── Phase 4 will replace the rest of main() with: ──────────────────────────
+    //   let pool   = connect_db().await?;
+    //   let redis  = connect_redis().await?;
+    //   let consumer = queue::Consumer::new(redis, hostname());
+    //   consumer.ensure_group().await?;
+    //   loop {
+    //       for job in consumer.read_batch(8).await? {
+    //           match processor::dispatch(&pool, &job).await {
+    //               Ok(())  => consumer.ack(&job.id).await?,
+    //               Err(e)  => { warn!(?e); consumer.requeue_or_dead_letter(&job).await?; }
+    //           }
+    //       }
+    //   }
     Ok(())
 }
