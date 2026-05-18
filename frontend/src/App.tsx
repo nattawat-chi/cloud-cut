@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { CollabSimulator } from '@/components/collaboration/CollabSimulator';
+import { CollabClient } from '@/components/collaboration/CollabClient';
 import { EditorLayout } from '@/components/layout/EditorLayout';
 import { EffectsBrowser } from '@/components/overlays/EffectsBrowser';
 import { HistoryPanel } from '@/components/overlays/HistoryPanel';
@@ -26,7 +26,7 @@ export default function App() {
   return (
     <>
       <EditorLayout />
-      <CollabSimulator />
+      <CollabClient />
       <HistoryPanel />
       <ShortcutsOverlay />
       <EffectsBrowser />

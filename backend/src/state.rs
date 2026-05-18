@@ -5,6 +5,7 @@ use aws_sdk_s3::config::{BehaviorVersion, Region};
 use sqlx::PgPool;
 
 use crate::config::Config;
+use crate::pusher::client::PusherClient;
 
 /// Shared application state injected into every Axum handler via `State<AppState>`.
 #[derive(Clone)]
@@ -13,6 +14,8 @@ pub struct AppState {
     pub redis: redis::Client,
     pub config: Arc<Config>,
     pub s3: aws_sdk_s3::Client,
+    /// `None` when Pusher is not configured — handlers skip publish/sign silently.
+    pub pusher: Option<Arc<PusherClient>>,
 }
 
 impl AppState {
@@ -20,11 +23,18 @@ impl AppState {
         let db = PgPool::connect(&config.database_url).await?;
         let redis = redis::Client::open(config.redis_url.as_str())?;
         let s3 = build_s3_client(&config);
+        let pusher = PusherClient::from_config(&config);
+        if pusher.is_some() {
+            tracing::info!("pusher ✓ (collaboration enabled)");
+        } else {
+            tracing::warn!("pusher disabled — set PUSHER_APP_ID/KEY/SECRET to enable");
+        }
         Ok(Self {
             db,
             redis,
             config: Arc::new(config),
             s3,
+            pusher,
         })
     }
 }

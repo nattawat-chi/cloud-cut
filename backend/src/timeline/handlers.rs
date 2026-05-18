@@ -11,6 +11,7 @@ use validator::Validate;
 use crate::{
     auth::extractor::AuthUser,
     error::AppError,
+    pusher::publish_project_event,
     state::AppState,
     timeline::models::{
         AddClipReq, AddEffectReq, ClipRow, CreateTrackReq, EffectRow, SplitClipReq,
@@ -165,6 +166,13 @@ pub async fn add_clip(
     .await?;
 
     log_operation(&state, project_id, auth.user_id, "add_clip", &row).await;
+    publish_project_event(
+        &state,
+        project_id,
+        "clip:added",
+        serde_json::json!({ "actor": auth.user_id, "clip": &row }),
+    )
+    .await;
     Ok((StatusCode::CREATED, Json(row)))
 }
 
@@ -205,6 +213,13 @@ pub async fn update_clip(
     .await?;
 
     log_operation(&state, project_id, auth.user_id, "update_clip", &row).await;
+    publish_project_event(
+        &state,
+        project_id,
+        "clip:updated",
+        serde_json::json!({ "actor": auth.user_id, "clip": &row }),
+    )
+    .await;
     Ok(Json(row))
 }
 
@@ -221,6 +236,13 @@ pub async fn delete_clip(
         .execute(&state.db)
         .await?;
 
+    publish_project_event(
+        &state,
+        project_id,
+        "clip:deleted",
+        serde_json::json!({ "actor": auth.user_id, "clip_id": clip_id }),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -276,7 +298,15 @@ pub async fn split_clip(
     .fetch_one(&state.db)
     .await?;
 
-    Ok(Json(vec![left, right]))
+    let pair = vec![left, right];
+    publish_project_event(
+        &state,
+        project_id,
+        "clip:split",
+        serde_json::json!({ "actor": auth.user_id, "clips": &pair }),
+    )
+    .await;
+    Ok(Json(pair))
 }
 
 // ─── Effects ──────────────────────────────────────────────────────────────────

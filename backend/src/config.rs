@@ -25,6 +25,13 @@ pub struct Config {
     // HTTP server
     pub backend_host: String,
     pub backend_port: u16,
+
+    // Pusher (collaboration). All optional — if any is missing, Pusher is disabled
+    // and the backend skips channel-auth + event publishing (dev-friendly).
+    pub pusher_app_id: Option<String>,
+    pub pusher_key: Option<String>,
+    pub pusher_secret: Option<String>,
+    pub pusher_cluster: Option<String>,
 }
 
 impl Config {
@@ -46,6 +53,11 @@ impl Config {
 
             backend_host: optional("BACKEND_HOST", "0.0.0.0"),
             backend_port: optional_parse("BACKEND_PORT", 8080)?,
+
+            pusher_app_id: std::env::var("PUSHER_APP_ID").ok(),
+            pusher_key: std::env::var("PUSHER_KEY").ok(),
+            pusher_secret: std::env::var("PUSHER_SECRET").ok(),
+            pusher_cluster: std::env::var("PUSHER_CLUSTER").ok(),
         })
     }
 }

@@ -9,6 +9,7 @@ mod config;
 mod error;
 mod exports;
 mod projects;
+mod pusher;
 mod state;
 mod timeline;
 
@@ -75,7 +76,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(projects::router())
         .merge(timeline::router())
         .merge(assets::router())
-        .merge(exports::router());
+        .merge(exports::router())
+        .merge(pusher::router());
 
     Router::new()
         .nest("/api/v1", api)

@@ -44,6 +44,10 @@ sha2 = "0.10"
 hex = "0.4"
 base64 = "0.22"
 
+# Pusher: HMAC-SHA256 channel auth + REST API body signing
+hmac = "0.12"
+md-5 = "0.10"
+
 # Validation
 validator = { version = "0.18", features = ["derive"] }
 

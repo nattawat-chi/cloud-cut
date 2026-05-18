@@ -28,7 +28,7 @@
 | 2026-05-18 | 2 | Database schema + migrations + seed | ✅ |
 | 2026-05-18 | 3 | Backend API (Axum + auth) | ✅ |
 | 2026-05-18 | 4 | Worker + ffmpeg pipelines | ✅ |
-| — | 5 | Pusher collaboration | ⏳ |
+| 2026-05-18 | 5 | Pusher collaboration | ✅ |
 
 ---
 
