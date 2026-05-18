@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { ViewportCursors } from '@/components/collaboration/ViewportCursors';
 import { PanelHead } from '@/components/shared/PanelHead';
@@ -45,9 +45,15 @@ export function VideoPlayer() {
 
   // ─── <video> sync ──────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Falls back to MockFrame when the proxy can't be loaded (e.g. seeded assets
+  // whose proxy.mp4 files don't yet exist in MinIO, or a transient network
+  // error). Cleared whenever the source URL changes so a different clip gets
+  // a fresh attempt.
+  const [videoError, setVideoError] = useState(false);
 
   // Reload the element when the source URL changes (clip flip)
   useEffect(() => {
+    setVideoError(false);
     const v = videoRef.current;
     if (!v || !proxyUrl) return;
     if (v.src !== proxyUrl) v.load();
@@ -111,7 +117,7 @@ export function VideoPlayer() {
             boxShadow: '0 14px 50px -20px rgba(0,0,0,0.7), 0 0 0 1px var(--line)',
           }}
         >
-          {proxyUrl ? (
+          {proxyUrl && !videoError ? (
             <video
               ref={videoRef}
               src={proxyUrl}
@@ -119,16 +125,18 @@ export function VideoPlayer() {
               playsInline
               preload="auto"
               onError={(e) => {
-                // Surface MinIO 404 / CORS / decode failures so the user
-                // doesn't stare at a silent black stage. The MediaError
-                // codes: 1=ABORTED 2=NETWORK 3=DECODE 4=SRC_NOT_SUPPORTED.
+                // Log the failure and fall back to MockFrame. Common causes:
+                // proxy.mp4 not yet in MinIO (seeded/processing assets),
+                // MinIO 404 returns S3 XML which the media engine rejects as
+                // code=4 (SRC_NOT_SUPPORTED), transient network errors.
                 const v = e.currentTarget;
                 const code = v.error?.code;
                 const msg = v.error?.message ?? 'unknown';
                 // eslint-disable-next-line no-console
                 console.warn(
-                  `<video> failed to load (code=${code}, msg="${msg}") src=${proxyUrl}`,
+                  `<video> failed to load (code=${code}, msg="${msg}") src=${proxyUrl} — falling back to MockFrame`,
                 );
+                setVideoError(true);
               }}
             />
           ) : (

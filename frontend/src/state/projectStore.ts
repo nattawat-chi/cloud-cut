@@ -52,6 +52,12 @@ export interface ProjectState {
   redoLocal: () => boolean;
   /** True when there's at least one snapshot to undo. */
   canUndoLocal: () => boolean;
+  /**
+   * Capture the current state onto the undo stack without changing anything
+   * else. Call this at the START of an interactive drag (mousedown) so the
+   * entire drag is one undoable step, not one snapshot per mousemove frame.
+   */
+  snapshotNow: () => void;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   /** Hydrate from the in-memory mock fixture (dev fallback). */
@@ -137,6 +143,11 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   _redoStack: [],
 
   canUndoLocal: () => get()._undoStack.length > 0,
+
+  snapshotNow: () =>
+    set((s) => ({
+      ...pushSnapshot(s),
+    })),
 
   undoLocal: () => {
     const s = get();
@@ -317,8 +328,10 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
 
   moveClip: (clipId, newPosMs, newTrackId) => {
     const safePos = Math.max(0, Math.round(newPosMs));
+    // No pushSnapshot here — caller must call snapshotNow() once at drag-start
+    // (mousedown). Snapshotting on every mousemove would fill the undo stack
+    // with intermediate positions and make Undo roll back only one frame.
     set((s) => ({
-      ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
           ? {
@@ -344,8 +357,8 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   resizeClip: (clipId, newPosMs, newDurMs) => {
     const safePos = Math.max(0, Math.round(newPosMs));
     const safeDur = Math.max(400, Math.round(newDurMs));
+    // No pushSnapshot here — same rationale as moveClip above.
     set((s) => ({
-      ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
           ? {
