@@ -380,8 +380,6 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
 
   splitClipAt: (clipId, atMs) => {
     const safeAt = Math.round(atMs);
-    // Track the temp id we assign to the right-half so we can swap it for
-    // the server-issued UUID once the API responds.
     let rightTmpId: UUID | null = null;
     let splitLocalMs = 0; // distance from clip start to the split point
 
@@ -389,7 +387,13 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       const out: Clip[] = [];
       for (const c of s.clips) {
         const local = safeAt - c.posMs;
-        if (c.id === clipId && local > 200 && local < c.durMs - 200) {
+        // 400ms minimum on each half — matches the Postgres CHECK on
+        // clips.dur_ms and the backend split guard. A 200ms guard here
+        // would let the user split a 500ms clip into two 250ms halves
+        // and only fail on the API roundtrip (with a "clips_dur_ms_check
+        // violation" message), leaving the local state out of sync with
+        // the database.
+        if (c.id === clipId && local >= 400 && local <= c.durMs - 400) {
           const halfThumbs = c.thumbs ? c.thumbs.slice(Math.floor(c.thumbs.length / 2)) : undefined;
           out.push({ ...c, durMs: local, version: c.version + 1 });
           rightTmpId = uid('c-tmp');
@@ -426,7 +430,13 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
           ),
         }));
       })
-      .catch((e) => console.warn('splitClipAt persist failed:', e));
+      .catch((e) => {
+        console.warn('splitClipAt persist failed — rolling back local split:', e);
+        // Pop the snapshot we just pushed so the editor doesn't render two
+        // half-clips that don't exist on the server. The user sees the
+        // original whole clip again + a toast (added in CollabClient layer).
+        useProjectStore.getState().undoLocal();
+      });
   },
 
   deleteClips: (clipIds) => {

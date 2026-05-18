@@ -40,6 +40,12 @@ interface ClipDeletedPayload {
   readonly clip_id: string;
 }
 
+interface ClipSplitPayload {
+  readonly actor: string;
+  // Backend timeline/handlers.rs::split_clip returns [leftUpdated, rightNew]
+  readonly clips: readonly ClipUpdatedPayload['clip'][];
+}
+
 export function CollabClient(): null {
   useRealtime();
   return null;
@@ -148,6 +154,15 @@ function useRealtime(): void {
     channel.bind('clip:deleted', (payload: ClipDeletedPayload) => {
       if (isOwnAction(payload.actor)) return;
       applyRemoteClipDelete(payload.clip_id);
+    });
+
+    // Split fires after the backend transaction commits both the shortened
+    // left half and the new right half. Apply both as upserts — the left
+    // already exists locally (its dur_ms is updated in place by upsert
+    // matching on id), and the right is brand new.
+    channel.bind('clip:split', (payload: ClipSplitPayload) => {
+      if (isOwnAction(payload.actor)) return;
+      for (const c of payload.clips) applyRemoteClipUpsert(c);
     });
 
     return () => {

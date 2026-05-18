@@ -258,9 +258,13 @@ pub async fn split_clip(
 
     let original = fetch_clip(&state, clip_id).await?;
 
-    if req.split_at_ms <= 200 || req.split_at_ms >= original.dur_ms - 200 {
+    // 400ms minimum to match the Postgres CHECK (clips.dur_ms >= 400). Asking
+    // for a 200ms split would create a half that fails the constraint and
+    // rolls back the whole transaction with a confusing constraint-violation
+    // error on the client.
+    if req.split_at_ms < 400 || req.split_at_ms > original.dur_ms - 400 {
         return Err(AppError::BadRequest(
-            "split point must be at least 200ms from either edge".into(),
+            "split point must be at least 400ms from either edge".into(),
         ));
     }
 
