@@ -206,6 +206,47 @@ pub async fn update_asset_status(
     Ok(Json(row))
 }
 
+// ─── DELETE /api/v1/assets/:id ───────────────────────────────────────────────
+/// Removes the asset row + its variants. S3 objects are left orphaned —
+/// a periodic janitor job (not implemented in this scope) would sweep them.
+/// Returns 409 if any clip in any project still references the asset.
+pub async fn delete_asset(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(asset_id): Path<Uuid>,
+) -> Result<axum::http::StatusCode, AppError> {
+    let ws_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT workspace_id FROM assets WHERE id = $1")
+            .bind(asset_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let ws_id = ws_id.ok_or_else(|| AppError::NotFound("asset".into()))?;
+    require_workspace_member(&state, ws_id, auth.user_id).await?;
+
+    // Block delete while any clip still references it — otherwise the timeline
+    // would render orphan clips that crash on Inspector lookup.
+    let in_use: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM clips WHERE asset_id = $1)",
+    )
+    .bind(asset_id)
+    .fetch_one(&state.db)
+    .await?;
+    if in_use {
+        return Err(AppError::Conflict(
+            "asset is used by one or more clips — remove the clips first".into(),
+        ));
+    }
+
+    // ON DELETE CASCADE on asset_variants takes care of the variants table.
+    sqlx::query("DELETE FROM assets WHERE id = $1")
+        .bind(asset_id)
+        .execute(&state.db)
+        .await?;
+
+    tracing::info!(%asset_id, "asset deleted");
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 const ASSETS_STREAM: &str = "cloudcut:assets";
 
 async fn enqueue_processing(state: &AppState, asset_id: Uuid) -> Result<(), AppError> {

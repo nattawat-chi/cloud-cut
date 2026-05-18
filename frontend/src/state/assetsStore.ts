@@ -31,6 +31,9 @@ export interface AssetsState {
   /** Patch an existing asset (used by the poller when status changes). */
   update: (id: UUID, patch: Partial<Asset>) => void;
 
+  /** Drop a single asset (after successful DELETE /assets/:id). */
+  remove: (id: UUID) => void;
+
   /** Clear cache — call on logout / workspace switch. */
   reset: () => void;
 }
@@ -77,6 +80,17 @@ export const useAssetsStore = create<AssetsState>()((set) => ({
       return {
         items: s.items.map((a) => (a.id === id ? next : a)),
         byId: { ...s.byId, [id]: next },
+      };
+    }),
+
+  remove: (id) =>
+    set((s) => {
+      if (!s.byId[id]) return {};
+      const byId = { ...s.byId };
+      delete byId[id];
+      return {
+        items: s.items.filter((a) => a.id !== id),
+        byId,
       };
     }),
 

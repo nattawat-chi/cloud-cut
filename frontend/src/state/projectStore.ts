@@ -24,12 +24,34 @@ import { uid } from '@/utils/id';
    PATCH; Phase 5 reconciles with Pusher broadcasts.
    ============================================================================= */
 
+/**
+ * Immutable snapshot used by the local undo stack. Holds the three slices that
+ * change during edits — project metadata (fps/resolution) doesn't get reverted.
+ */
+interface ProjectSnapshot {
+  readonly tracks: readonly Track[];
+  readonly clips: readonly Clip[];
+  readonly effects: Readonly<Record<UUID, readonly ClipEffect[]>>;
+}
+
 export interface ProjectState {
   project: Project | null;
   tracks: readonly Track[];
   clips: readonly Clip[];
   /** Effects keyed by `clip.id`. Absent key === "no effects on this clip". */
   effects: Readonly<Record<UUID, readonly ClipEffect[]>>;
+  /** Local undo stack — most-recent first. Capped to avoid unbounded growth. */
+  _undoStack: readonly ProjectSnapshot[];
+  /** Redo stack — populated when undo runs. Cleared on any new mutation. */
+  _redoStack: readonly ProjectSnapshot[];
+
+  /** Pop the latest snapshot and restore it. No-op when stack is empty.
+   *  Returns true if anything was reverted. */
+  undoLocal: () => boolean;
+  /** Redo a previously-undone mutation. Returns true on success. */
+  redoLocal: () => boolean;
+  /** True when there's at least one snapshot to undo. */
+  canUndoLocal: () => boolean;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
   /** Hydrate from the in-memory mock fixture (dev fallback). */
@@ -71,11 +93,70 @@ const EFFECT_DEFAULTS: Record<EffectType, number> = {
   blur: 0,
 };
 
-export const useProjectStore = create<ProjectState>()((set) => ({
+const MAX_UNDO = 50;
+
+/** Snapshot the current state into the undo stack and clear the redo stack.
+ *  Call this from every user-initiated mutation BEFORE applying the change.
+ *  Hydration / undo / redo themselves never snapshot. */
+function pushSnapshot(s: ProjectState): Pick<ProjectState, '_undoStack' | '_redoStack'> {
+  const snap: ProjectSnapshot = {
+    tracks: s.tracks,
+    clips: s.clips,
+    effects: s.effects,
+  };
+  return {
+    _undoStack: [snap, ...s._undoStack].slice(0, MAX_UNDO),
+    _redoStack: [],
+  };
+}
+
+export const useProjectStore = create<ProjectState>()((set, get) => ({
   project: null,
   tracks: [],
   clips: [],
   effects: {},
+  _undoStack: [],
+  _redoStack: [],
+
+  canUndoLocal: () => get()._undoStack.length > 0,
+
+  undoLocal: () => {
+    const s = get();
+    const [top, ...rest] = s._undoStack;
+    if (!top) return false;
+    const current: ProjectSnapshot = {
+      tracks: s.tracks,
+      clips: s.clips,
+      effects: s.effects,
+    };
+    set({
+      tracks: top.tracks,
+      clips: top.clips,
+      effects: top.effects,
+      _undoStack: rest,
+      _redoStack: [current, ...s._redoStack].slice(0, MAX_UNDO),
+    });
+    return true;
+  },
+
+  redoLocal: () => {
+    const s = get();
+    const [top, ...rest] = s._redoStack;
+    if (!top) return false;
+    const current: ProjectSnapshot = {
+      tracks: s.tracks,
+      clips: s.clips,
+      effects: s.effects,
+    };
+    set({
+      tracks: top.tracks,
+      clips: top.clips,
+      effects: top.effects,
+      _redoStack: rest,
+      _undoStack: [current, ...s._undoStack].slice(0, MAX_UNDO),
+    });
+    return true;
+  },
 
   loadMockProject: () =>
     set({
@@ -83,6 +164,8 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       tracks: MOCK_TRACKS,
       clips: MOCK_CLIPS,
       effects: MOCK_EFFECTS,
+      _undoStack: [],
+      _redoStack: [],
     }),
 
   loadProjectFromApi: async (projectId) => {
@@ -149,11 +232,15 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       tracks,
       clips,
       effects,
+      // Hydration resets the undo history — you can't undo back past a project load.
+      _undoStack: [],
+      _redoStack: [],
     });
   },
 
   toggleTrack: (trackId, key) =>
     set((s) => ({
+      ...pushSnapshot(s),
       tracks: s.tracks.map((t) =>
         t.id === trackId ? { ...t, [key]: !t[key] } : t,
       ),
@@ -162,6 +249,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
   addClip: ({ trackId, assetId, posMs, durMs, name, thumbs }) => {
     const id = uid('c');
     set((s) => ({
+      ...pushSnapshot(s),
       clips: [
         ...s.clips,
         {
@@ -184,6 +272,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
 
   moveClip: (clipId, newPosMs, newTrackId) =>
     set((s) => ({
+      ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
           ? {
@@ -198,6 +287,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
 
   resizeClip: (clipId, newPosMs, newDurMs) =>
     set((s) => ({
+      ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
           ? {
@@ -212,8 +302,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
 
   trimClip: (clipId, _side, newDurMs) =>
     set((s) => ({
-      // Minimum clip duration of 400ms — same guardrail as the prototype's
-      // drag handler. Prevents zero-width clips that break the layout.
+      ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
           ? { ...c, durMs: Math.max(400, newDurMs), version: c.version + 1 }
@@ -241,7 +330,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
           out.push(c);
         }
       }
-      return { clips: out };
+      return { ...pushSnapshot(s), clips: out };
     }),
 
   deleteClips: (clipIds) =>
@@ -251,6 +340,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       const nextEffects = { ...s.effects };
       for (const id of drop) delete nextEffects[id];
       return {
+        ...pushSnapshot(s),
         clips: s.clips.filter((c) => !drop.has(c.id)),
         effects: nextEffects,
       };
@@ -262,7 +352,10 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       const value = EFFECT_DEFAULTS[type] ?? meta.min;
       const fx: ClipEffect = { id: uid('fx'), type, enabled: true, value };
       const existing = s.effects[clipId] ?? [];
-      return { effects: { ...s.effects, [clipId]: [...existing, fx] } };
+      return {
+        ...pushSnapshot(s),
+        effects: { ...s.effects, [clipId]: [...existing, fx] },
+      };
     }),
 
   toggleEffect: (clipId, effectId) =>
@@ -270,6 +363,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       const list = s.effects[clipId];
       if (!list) return {};
       return {
+        ...pushSnapshot(s),
         effects: {
           ...s.effects,
           [clipId]: list.map((fx) =>
@@ -283,6 +377,10 @@ export const useProjectStore = create<ProjectState>()((set) => ({
     set((s) => {
       const list = s.effects[clipId];
       if (!list) return {};
+      // NB: slider drags fire updateEffect at 60fps. To keep the undo stack
+      // useful (one entry per "interaction" rather than one per frame), we
+      // skip the snapshot here. The trade-off: dragging a slider can't be
+      // undone — but you can toggle the effect off instead.
       return {
         effects: {
           ...s.effects,
@@ -296,6 +394,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       const list = s.effects[clipId];
       if (!list) return {};
       return {
+        ...pushSnapshot(s),
         effects: { ...s.effects, [clipId]: list.filter((fx) => fx.id !== effectId) },
       };
     }),
@@ -308,6 +407,11 @@ export const useProjectStore = create<ProjectState>()((set) => ({
    ───────────────────────────────────────────────────────────────────────────── */
 export const selectTotalDurationMs = (s: ProjectState): number =>
   s.clips.reduce((m, c) => Math.max(m, c.posMs + c.durMs), 0);
+
+/** True when there's something to undo. Subscribe via `useProjectStore`. */
+export const selectCanUndo = (s: ProjectState): boolean => s._undoStack.length > 0;
+/** True when there's something to redo. Subscribe via `useProjectStore`. */
+export const selectCanRedo = (s: ProjectState): boolean => s._redoStack.length > 0;
 
 export const selectClipById = (id: UUID) => (s: ProjectState): Clip | undefined =>
   s.clips.find((c) => c.id === id);

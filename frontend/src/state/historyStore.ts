@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type { HistoryEntry, HistoryOpType, Toast } from '@/types';
 import { MOCK_HISTORY } from '@/mocks/cloudcut';
 import { uid } from '@/utils/id';
+import { useProjectStore } from './projectStore';
 
 /* =============================================================================
    historyStore — undo/redo entries + transient toast stack.
@@ -58,7 +59,12 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
 
   undo: () =>
     set((s) => {
-      if (s.cursor < 0) return {};
+      // Actually revert the project state via the snapshot stack — flipping
+      // the `undone` flag alone is cosmetic and was the source of the
+      // "undo doesn't work" complaint. Only advance the cursor when the
+      // project store had something to roll back.
+      const reverted = useProjectStore.getState().undoLocal();
+      if (!reverted || s.cursor < 0) return {};
       const entries = s.entries.map((e, i) =>
         i === s.cursor ? { ...e, undone: true } : e,
       );
@@ -67,7 +73,8 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
 
   redo: () =>
     set((s) => {
-      if (s.cursor >= s.entries.length - 1) return {};
+      const restored = useProjectStore.getState().redoLocal();
+      if (!restored || s.cursor >= s.entries.length - 1) return {};
       const nextCursor = s.cursor + 1;
       const entries = s.entries.map((e, i) =>
         i === nextCursor ? { ...e, undone: false } : e,
@@ -100,6 +107,8 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
     set((s) => ({ toasts: s.toasts.filter((tx) => tx.id !== id) })),
 }));
 
-export const selectCanUndo = (s: HistoryState): boolean => s.cursor >= 0;
-export const selectCanRedo = (s: HistoryState): boolean =>
-  s.cursor < s.entries.length - 1;
+// canUndo / canRedo are now driven by the projectStore snapshot stacks and
+// must be subscribed *from* projectStore so React re-renders the buttons
+// when the stacks change. See `selectCanUndo` / `selectCanRedo` in
+// `./projectStore`. We deliberately don't re-export here — a thin alias
+// would break Zustand's subscription model.

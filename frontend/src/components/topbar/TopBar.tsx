@@ -15,14 +15,12 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/state/authStore';
 import {
+  selectCanRedo,
+  selectCanUndo,
   selectTotalDurationMs,
   useProjectStore,
 } from '@/state/projectStore';
-import {
-  selectCanRedo,
-  selectCanUndo,
-  useHistoryStore,
-} from '@/state/historyStore';
+import { useHistoryStore } from '@/state/historyStore';
 import { useUIStore } from '@/state/uiStore';
 import { fmtClipDur } from '@/utils/timecode';
 
@@ -35,8 +33,8 @@ export function TopBar() {
   const toggleTheme = useUIStore((s) => s.toggleTheme);
   const toggleShortcuts = useUIStore((s) => s.toggleShortcuts);
   const showShortcuts = useUIStore((s) => s.showShortcuts);
-  const canUndo = useHistoryStore(selectCanUndo);
-  const canRedo = useHistoryStore(selectCanRedo);
+  const canUndo = useProjectStore(selectCanUndo);
+  const canRedo = useProjectStore(selectCanRedo);
   const undo = useHistoryStore((s) => s.undo);
   const redo = useHistoryStore((s) => s.redo);
   const showHistoryPanel = useUIStore((s) => s.showHistoryPanel);

@@ -281,6 +281,9 @@ export const assets = {
 
   updateStatus: (assetId: string, body: { status: string; duration_ms?: number; width?: number; height?: number }) =>
     request<AssetResponse>('PATCH', `/assets/${assetId}/status`, body),
+
+  /** Remove the asset metadata row. Backend rejects with 409 if any clip still references it. */
+  delete: (assetId: string) => request<void>('DELETE', `/assets/${assetId}`),
 };
 
 // ─── Exports ─────────────────────────────────────────────────────────────────

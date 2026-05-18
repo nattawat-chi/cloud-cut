@@ -2,7 +2,7 @@ pub mod handlers;
 pub mod models;
 
 use axum::{
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
     Router,
 };
 
@@ -22,4 +22,5 @@ pub fn router() -> Router<AppState> {
             "/assets/:id/status",
             patch(handlers::update_asset_status),
         )
+        .route("/assets/:id", delete(handlers::delete_asset))
 }
