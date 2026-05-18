@@ -360,18 +360,26 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     }));
   },
 
-  splitClipAt: (clipId, atMs) =>
+  splitClipAt: (clipId, atMs) => {
+    const safeAt = Math.round(atMs);
+    // Track the temp id we assign to the right-half so we can swap it for
+    // the server-issued UUID once the API responds.
+    let rightTmpId: UUID | null = null;
+    let splitLocalMs = 0; // distance from clip start to the split point
+
     set((s) => {
       const out: Clip[] = [];
       for (const c of s.clips) {
-        const local = atMs - c.posMs;
+        const local = safeAt - c.posMs;
         if (c.id === clipId && local > 200 && local < c.durMs - 200) {
           const halfThumbs = c.thumbs ? c.thumbs.slice(Math.floor(c.thumbs.length / 2)) : undefined;
           out.push({ ...c, durMs: local, version: c.version + 1 });
+          rightTmpId = uid('c-tmp');
+          splitLocalMs = local;
           out.push({
             ...c,
-            id: uid('c'),
-            posMs: atMs,
+            id: rightTmpId,
+            posMs: safeAt,
             durMs: c.durMs - local,
             thumbs: halfThumbs,
             version: 1,
@@ -381,7 +389,27 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
         }
       }
       return { ...pushSnapshot(s), clips: out };
-    }),
+    });
+
+    // Persist: backend POST /clips/:id/split expects `split_at_ms` *relative*
+    // to the clip's start (not absolute timeline position). It returns both
+    // halves; the right half is brand new on the server so we swap our
+    // optimistic temp id for its real UUID.
+    if (clipId.startsWith('c-tmp') || !rightTmpId) return;
+    const localRightTmpId: UUID = rightTmpId;
+    void timelineApi
+      .splitClip(clipId, splitLocalMs)
+      .then((pair) => {
+        const rightFromServer = pair.find((p) => p.pos_ms >= safeAt);
+        if (!rightFromServer) return;
+        set((s) => ({
+          clips: s.clips.map((c) =>
+            c.id === localRightTmpId ? { ...c, id: rightFromServer.id } : c,
+          ),
+        }));
+      })
+      .catch((e) => console.warn('splitClipAt persist failed:', e));
+  },
 
   deleteClips: (clipIds) => {
     set((s) => {

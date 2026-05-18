@@ -17,6 +17,10 @@ struct ClipRow {
     dur_ms: i64,
     trim_in_ms: i64,
     speed: f64,
+    /// Path to the original asset in S3 — preferred for export so we don't
+    /// upscale the 720p proxy and lose detail.
+    original_key: Option<String>,
+    /// Proxy path — fallback only if the original is somehow missing.
     proxy_key: Option<String>,
 }
 
@@ -63,10 +67,14 @@ pub async fn run(
     };
 
     // ── Load clips ordered by track position + pos_ms ───────────────────────
+    // Fetch BOTH the original_key (preferred for export) and the proxy_key
+    // (fallback). Using original means we feed ffmpeg the full-resolution
+    // source so a 4K output isn't an upscale of a 720p proxy.
     let clips: Vec<ClipRow> = sqlx::query_as::<_, ClipRow>(
         r#"
         SELECT c.pos_ms, c.dur_ms, c.trim_in_ms, c.speed::float8 AS speed,
-               av.s3_key as proxy_key
+               a.original_key AS original_key,
+               av.s3_key      AS proxy_key
         FROM clips c
         JOIN tracks t ON t.id = c.track_id
         LEFT JOIN assets a ON a.id = c.asset_id
@@ -91,17 +99,23 @@ pub async fn run(
     let mut paths_and_meta: Vec<(std::path::PathBuf, i64, i64, i64, f64)> = Vec::new();
 
     for (i, clip) in clips.iter().enumerate() {
-        let Some(proxy_key) = &clip.proxy_key else {
-            tracing::warn!(i, "clip has no proxy, skipping");
+        // Prefer the original (full quality) over the proxy (720p preview).
+        let s3_key = clip
+            .original_key
+            .as_deref()
+            .or(clip.proxy_key.as_deref());
+        let Some(key) = s3_key else {
+            tracing::warn!(i, "clip has no source asset, skipping");
             continue;
         };
-        let local = tmp.path().join(format!("clip_{i}.mp4"));
-        s3::download_file(s3_client, &config.s3_bucket, proxy_key, &local).await?;
+        let ext = key.rsplit('.').next().unwrap_or("mp4");
+        let local = tmp.path().join(format!("clip_{i}.{ext}"));
+        s3::download_file(s3_client, &config.s3_bucket, key, &local).await?;
         paths_and_meta.push((local, clip.pos_ms, clip.dur_ms, clip.trim_in_ms, clip.speed));
     }
 
     if paths_and_meta.is_empty() {
-        fail_job(db, job_id, "no clips have proxies — wait for asset processing").await?;
+        fail_job(db, job_id, "no clips have a source asset to render").await?;
         return Ok(());
     }
 
