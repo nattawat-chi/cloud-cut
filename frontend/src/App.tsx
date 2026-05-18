@@ -48,8 +48,17 @@ export default function App() {
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof ApiError ? e.message : (e as Error).message;
+
+        // 401 = session truly dead (token expired AND refresh failed).
+        // Kick to login — mock fallback here would poison the editor with
+        // string IDs that break every follow-up API call (e.g. asset list).
+        if (e instanceof ApiError && e.status === 401) {
+          void logout();
+          return;
+        }
+
         setBootstrapError(msg);
-        // Fall back to mock so the editor still renders, instead of a blank screen.
+        // Backend down / no workspaces: fall back to mock so the UI still renders.
         loadMockProject();
       }
     })();

@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { selectHasProcessing, useAssetsStore } from '@/state/assetsStore';
 
 const POLL_INTERVAL_MS = 3_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Hydrate the assets store for a workspace and poll while anything is still
@@ -20,15 +21,17 @@ export function useAssetsHydration(workspaceId: string | null | undefined): {
   const hydrate = useAssetsStore((s) => s.hydrate);
   const hasProcessing = useAssetsStore(selectHasProcessing);
 
-  // Initial hydrate
+  // Initial hydrate — only fire on a real UUID. When the project store is on
+  // mock data its `workspace` is a label like "Cobalt Studio" which would
+  // round-trip into a 400 from the backend.
   useEffect(() => {
-    if (!workspaceId) return;
+    if (!workspaceId || !UUID_RE.test(workspaceId)) return;
     void hydrate(workspaceId);
   }, [workspaceId, hydrate]);
 
   // Poll while anything is still processing
   useEffect(() => {
-    if (!workspaceId || !hasProcessing) return;
+    if (!workspaceId || !UUID_RE.test(workspaceId) || !hasProcessing) return;
     const id = window.setInterval(() => {
       void hydrate(workspaceId);
     }, POLL_INTERVAL_MS);

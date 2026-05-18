@@ -44,6 +44,31 @@ async function request<T>(
   body?: unknown,
   opts: RequestOptions = {},
 ): Promise<T> {
+  const resp = await fetchOnce(method, path, body, opts);
+
+  // ── One-shot 401 retry via refresh token ────────────────────────────────────
+  // If the access token expired between page load and this call, transparently
+  // mint a new one and replay the request. Anonymous calls (login/register) and
+  // refresh itself skip this path to avoid recursion.
+  if (resp.status === 401 && !opts.anonymous && path !== '/auth/refresh') {
+    const ok = await useAuthStore.getState().refresh();
+    if (ok) {
+      const retry = await fetchOnce(method, path, body, opts);
+      return await consume<T>(retry);
+    }
+    // refresh failed → caller will see ApiError(401) and the auth gate in
+    // App.tsx will flip back to the login screen (no token in store).
+  }
+
+  return await consume<T>(resp);
+}
+
+async function fetchOnce(
+  method: string,
+  path: string,
+  body: unknown,
+  opts: RequestOptions,
+): Promise<Response> {
   const headers: Record<string, string> = {};
   if (!opts.rawBody && body !== undefined) {
     headers['Content-Type'] = opts.contentType ?? 'application/json';
@@ -52,17 +77,16 @@ async function request<T>(
     const token = useAuthStore.getState().accessToken;
     if (token) headers['Authorization'] = `Bearer ${token}`;
   }
-
   const init: RequestInit = { method, headers };
   if (opts.rawBody !== undefined) {
     init.body = opts.rawBody;
   } else if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
+  return fetch(`${BASE_URL}${path}`, init);
+}
 
-  const resp = await fetch(`${BASE_URL}${path}`, init);
-
-  // 204 No Content — return undefined cast to T (callers using void won't care)
+async function consume<T>(resp: Response): Promise<T> {
   if (resp.status === 204) return undefined as T;
 
   const text = await resp.text();
