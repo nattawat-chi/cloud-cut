@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Stdio;
 
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::error::WorkerError;
@@ -332,6 +332,12 @@ async fn run_ffmpeg(args: &[&str]) -> Result<(), WorkerError> {
 /// extracts `out_time_us=N` values, computes a 0–100 percent against
 /// `duration_ms`, and invokes `on_progress` after each "block" (ffmpeg emits
 /// one block ~every 500ms ending with `progress=continue` or `progress=end`).
+///
+/// IMPORTANT: ffmpeg is *very* verbose on stderr (codec banners, container
+/// muxer warnings, hundreds of lines for a 30s clip). We must drain stderr
+/// concurrently with stdout — otherwise the OS pipe buffer fills (~64 KB on
+/// Windows), ffmpeg blocks on the next `write(2)`, and `child.wait()` deadlocks
+/// forever. This was hanging the worker until restart for any non-trivial clip.
 async fn run_ffmpeg_with_progress<F, Fut>(
     args: &[String],
     duration_ms: Option<i64>,
@@ -354,9 +360,22 @@ where
         .stdout
         .take()
         .ok_or_else(|| WorkerError::Ffmpeg("missing stdout pipe".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| WorkerError::Ffmpeg("missing stderr pipe".into()))?;
+
+    // Drain stderr on a background task so it can't deadlock the pipe.
+    let stderr_handle = tokio::spawn(async move {
+        let mut buf = String::new();
+        let _ = BufReader::new(stderr).read_to_string(&mut buf).await;
+        buf
+    });
+
     let total_us = duration_ms.map(|d| d * 1000).unwrap_or(0);
 
-    // Parse progress lines until EOF
+    // Parse progress lines until EOF on stdout (which happens when ffmpeg closes
+    // its progress pipe — typically right at process exit).
     let mut reader = BufReader::new(stdout).lines();
     let mut last_emit: i16 = 0;
     while let Some(line) = reader
@@ -364,8 +383,6 @@ where
         .await
         .map_err(|e| WorkerError::Ffmpeg(format!("read progress: {e}")))?
     {
-        // ffmpeg progress format: `key=value`. We only care about `out_time_us`
-        // and the `progress=` sentinel that terminates each block.
         if let Some(value) = line.strip_prefix("out_time_us=") {
             if total_us > 0 {
                 if let Ok(out_us) = value.trim().parse::<i64>() {
@@ -386,13 +403,10 @@ where
         .wait()
         .await
         .map_err(|e| WorkerError::Ffmpeg(format!("ffmpeg wait: {e}")))?;
+    let stderr_text = stderr_handle.await.unwrap_or_default();
+
     if !status.success() {
-        // Drain stderr for diagnostics
-        let mut stderr_buf = String::new();
-        if let Some(mut s) = child.stderr.take() {
-            let _ = tokio::io::AsyncReadExt::read_to_string(&mut s, &mut stderr_buf).await;
-        }
-        let tail: String = stderr_buf.chars().rev().take(500).collect::<String>()
+        let tail: String = stderr_text.chars().rev().take(500).collect::<String>()
             .chars().rev().collect();
         return Err(WorkerError::Ffmpeg(format!(
             "exit {:?}: …{tail}",
