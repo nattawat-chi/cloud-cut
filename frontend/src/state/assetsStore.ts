@@ -105,10 +105,21 @@ export function selectHasProcessing(s: AssetsState): boolean {
 
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
+/**
+ * Sensible default for local docker-compose setups. The .env override stays
+ * authoritative for prod / cloud-storage deployments. Hard-coding the dev
+ * default avoids the silent "black <video>" trap when someone forgets to
+ * restart Vite after adding VITE_S3_PUBLIC_URL to .env (Vite reads env vars
+ * only at startup; HMR doesn't pick them up).
+ */
+const S3_PUBLIC_BASE =
+  (import.meta.env.VITE_S3_PUBLIC_URL as string | undefined) ??
+  'http://localhost:9000/cloudcut-assets';
+
 /** Map an `AssetResponse` from the backend into the frontend's `Asset` shape. */
 export function toAsset(r: AssetResponse): Asset {
   const type: AssetType = r.kind === 'font' ? 'image' : (r.kind as AssetType);
-  const base = `${import.meta.env.VITE_S3_PUBLIC_URL ?? '/s3/cloudcut-assets'}/variants/${r.id}`;
+  const base = `${S3_PUBLIC_BASE}/variants/${r.id}`;
   const ready = r.status === 'ready';
 
   // Real progress comes from the backend `progress_pct` column the worker

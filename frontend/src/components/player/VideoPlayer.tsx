@@ -118,6 +118,18 @@ export function VideoPlayer() {
               className="absolute inset-0 h-full w-full object-contain"
               playsInline
               preload="auto"
+              onError={(e) => {
+                // Surface MinIO 404 / CORS / decode failures so the user
+                // doesn't stare at a silent black stage. The MediaError
+                // codes: 1=ABORTED 2=NETWORK 3=DECODE 4=SRC_NOT_SUPPORTED.
+                const v = e.currentTarget;
+                const code = v.error?.code;
+                const msg = v.error?.message ?? 'unknown';
+                // eslint-disable-next-line no-console
+                console.warn(
+                  `<video> failed to load (code=${code}, msg="${msg}") src=${proxyUrl}`,
+                );
+              }}
             />
           ) : (
             <MockFrame clip={clip} />
