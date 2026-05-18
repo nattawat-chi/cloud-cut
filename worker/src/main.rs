@@ -1,12 +1,22 @@
-//! CloudCut worker — Phase 0 placeholder.
+//! CloudCut worker — Redis Streams consumer + ffmpeg pipelines.
 //!
-//! Real Redis Streams consumer + ffmpeg pipelines land in Phase 4. This binary
-//! only proves that `cargo run -p worker` succeeds (Rule 3) and that ffmpeg is
-//! reachable on PATH (worker container ships ffmpeg pre-installed).
+//! Start: `cargo run -p worker`
+//! Env:   copy `.env.example` to `.env`
 
-use std::process::Command;
+mod config;
+mod consumer;
+mod error;
+mod ffmpeg;
+mod jobs;
+mod s3;
 
-use tracing::{info, warn};
+use std::sync::Arc;
+
+use sqlx::PgPool;
+use tracing::info;
+
+use config::Config;
+use consumer::ConsumerContext;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -15,32 +25,53 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "worker=info".into()),
+                .unwrap_or_else(|_| "worker=debug,sqlx=warn".into()),
         )
         .init();
 
-    info!("CloudCut worker — Phase 0 placeholder");
-    info!(
-        "DATABASE_URL set: {}",
-        std::env::var("DATABASE_URL").is_ok()
-    );
-    info!("REDIS_URL set:    {}", std::env::var("REDIS_URL").is_ok());
+    let config = Config::from_env()?;
 
-    match Command::new("ffmpeg").arg("-version").output() {
-        Ok(out) if out.status.success() => {
-            let first_line = String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .next()
-                .unwrap_or("(unknown)")
-                .to_string();
-            info!("ffmpeg available: {first_line}");
-        }
-        Ok(out) => warn!(
-            "ffmpeg returned non-zero status: {}",
-            String::from_utf8_lossy(&out.stderr)
-        ),
-        Err(e) => warn!("ffmpeg not on PATH (will be required in Phase 4): {e}"),
-    }
+    // Verify ffmpeg is available (Rule #6)
+    verify_ffmpeg();
+
+    info!("connecting to database…");
+    let db = PgPool::connect(&config.database_url).await?;
+    info!("database connected ✓");
+
+    let redis = redis::Client::open(config.redis_url.as_str())?;
+    let s3 = s3::build_client(&config);
+
+    let consumer_name = format!(
+        "worker-{}",
+        hostname::get()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "unknown".into())
+    );
+
+    let ctx = Arc::new(ConsumerContext {
+        redis,
+        db,
+        config: Arc::new(config),
+        s3,
+        consumer_name: consumer_name.clone(),
+    });
+
+    info!(consumer = %consumer_name, "CloudCut worker started");
+
+    // Run the consumer loop — blocks forever
+    consumer::run(ctx).await;
 
     Ok(())
+}
+
+fn verify_ffmpeg() {
+    match std::process::Command::new("ffmpeg").arg("-version").output() {
+        Ok(out) if out.status.success() => {
+            let ver = String::from_utf8_lossy(&out.stdout);
+            let first = ver.lines().next().unwrap_or("unknown");
+            info!("ffmpeg ✓  {first}");
+        }
+        Ok(_) => tracing::warn!("ffmpeg returned non-zero status"),
+        Err(e) => tracing::warn!("ffmpeg not found on PATH: {e} — pipelines will fail"),
+    }
 }
