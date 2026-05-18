@@ -18,11 +18,12 @@ export function VideoPlayer() {
   usePlaybackTicker(); // mount-only — drives currentTimeMs when isPlaying.
 
   const clips = useProjectStore((s) => s.clips);
+  const tracks = useProjectStore((s) => s.tracks);
   const effectsMap = useProjectStore((s) => s.effects);
   const project = useProjectStore((s) => s.project);
   const currentTimeMs = usePlaybackStore((s) => s.currentTimeMs);
 
-  const clip = clipAtTime(clips, currentTimeMs);
+  const clip = clipAtTime(clips, tracks, currentTimeMs);
   const effects = clip ? effectsMap[clip.id] ?? [] : [];
   const cssFilter = filterFromEffects(effects);
 

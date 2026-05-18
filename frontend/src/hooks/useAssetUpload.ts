@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 
 import { ApiError, assets } from '@/services/api';
+import { toAsset, useAssetsStore } from '@/state/assetsStore';
 import { useHistoryStore } from '@/state/historyStore';
 
 interface UploadState {
@@ -32,6 +33,7 @@ export function useAssetUpload(workspaceId: string | null | undefined) {
   const [state, setState] = useState<UploadState>({ uploading: false, progress: 0, error: null });
   const inputRef = useRef<HTMLInputElement | null>(null);
   const toast = useHistoryStore((s) => s.toast);
+  const upsertAsset = useAssetsStore((s) => s.upsert);
 
   const upload = useCallback(
     async (file: File) => {
@@ -61,7 +63,11 @@ export function useAssetUpload(workspaceId: string | null | undefined) {
         );
 
         // 3. flip status → backend XADDs the cloudcut:assets stream
-        await assets.updateStatus(presign.asset_id, { status: 'processing' });
+        const updated = await assets.updateStatus(presign.asset_id, { status: 'processing' });
+
+        // Optimistically reflect the new asset in the browser sidebar — the
+        // hydration poller will refresh it once the worker finishes.
+        upsertAsset(toAsset(updated));
 
         setState({ uploading: false, progress: 1, error: null });
         toast({ who: 'Upload', body: `${file.name} uploaded, processing…` });
@@ -71,7 +77,7 @@ export function useAssetUpload(workspaceId: string | null | undefined) {
         toast({ who: 'Upload failed', body: msg });
       }
     },
-    [workspaceId, toast],
+    [workspaceId, toast, upsertAsset],
   );
 
   /** Open the OS file picker; calls `upload(file)` on selection. */

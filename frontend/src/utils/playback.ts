@@ -1,25 +1,32 @@
-import type { Clip, ClipEffect } from '@/types';
+import type { Clip, ClipEffect, Track } from '@/types';
 
 /**
  * Pick the clip "on screen" at a given timecode.
  *
- * The prototype's compositing rule (player.jsx): if a V2 B-Roll clip
- * overlaps the V1 main cam at this time, V2 wins. Audio tracks are
- * deliberately ignored — they affect playback sound, not the visible frame.
+ * Rules:
+ *   - Only video tracks contribute to the visible frame (audio is ignored).
+ *   - Tracks later in the `tracks` array composite **on top** — matches the
+ *     prototype convention where V2 overlays V1.
+ *   - Tracks with `visible === false` are skipped entirely (eye-icon toggle).
+ *   - First overlapping clip on the topmost visible track wins.
  *
  * Pure function for unit testing (Phase 1.8).
  */
 export function clipAtTime(
   clips: readonly Clip[],
+  tracks: readonly Track[],
   ms: number,
 ): Clip | undefined {
-  const v2 = clips.find(
-    (c) => c.trackId === 'tr_v2' && ms >= c.posMs && ms < c.posMs + c.durMs,
-  );
-  if (v2) return v2;
-  return clips.find(
-    (c) => c.trackId === 'tr_v1' && ms >= c.posMs && ms < c.posMs + c.durMs,
-  );
+  const videoTracks = tracks.filter((t) => t.type === 'video' && t.visible !== false);
+  // Walk from top track down so the highest layer wins on overlap.
+  for (let i = videoTracks.length - 1; i >= 0; i--) {
+    const tr = videoTracks[i]!;
+    const clip = clips.find(
+      (c) => c.trackId === tr.id && ms >= c.posMs && ms < c.posMs + c.durMs,
+    );
+    if (clip) return clip;
+  }
+  return undefined;
 }
 
 /**

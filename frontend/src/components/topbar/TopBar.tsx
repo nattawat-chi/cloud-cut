@@ -39,6 +39,30 @@ export function TopBar() {
   const showHistoryPanel = useUIStore((s) => s.showHistoryPanel);
   const toggleHistoryPanel = useUIStore((s) => s.toggleHistoryPanel);
   const showPresence = useUIStore((s) => s.showPresence);
+  const toast = useHistoryStore((s) => s.toast);
+
+  const handleShare = async () => {
+    const url = window.location.href;
+    // navigator.clipboard.writeText requires HTTPS or localhost — fall back to
+    // a textarea+execCommand for environments where the API is missing.
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      toast({ who: 'Share', body: 'Project link copied to clipboard' });
+    } catch {
+      toast({ who: 'Share', body: 'Could not copy — copy the URL manually' });
+    }
+  };
 
   return (
     <header
@@ -135,6 +159,8 @@ export function TopBar() {
         </IconBtn>
         <button
           type="button"
+          onClick={handleShare}
+          title="Copy project link to clipboard"
           className={cn(
             'inline-flex h-7 items-center gap-1.5 rounded-md border border-line bg-surface-2 px-3',
             'text-xs text-text-2 hover:bg-surface-3 hover:text-text-1',

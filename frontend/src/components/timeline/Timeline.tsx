@@ -237,7 +237,11 @@ export function Timeline() {
 
               <div className="relative" style={{ ['--major-px' as string]: `${rowGridPx}px` }}>
                 {visibleTracks.map((tr) => {
-                  const trackClips = clips.filter((c) => c.trackId === tr.id);
+                  // Hidden tracks keep their header (eye icon stays clickable)
+                  // but their clips don't render — matches Premiere/Resolve UX.
+                  const trackClips = tr.visible
+                    ? clips.filter((c) => c.trackId === tr.id)
+                    : [];
                   return (
                     <div
                       key={tr.id}

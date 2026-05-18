@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FilmIcon,
   ImageIcon,
@@ -11,7 +11,8 @@ import {
 import { cn } from '@/lib/utils';
 import { PanelHead } from '@/components/shared/PanelHead';
 import { useAssetUpload } from '@/hooks/useAssetUpload';
-import { MOCK_ASSETS } from '@/mocks/cloudcut';
+import { useAssetsHydration } from '@/hooks/useAssetsHydration';
+import { useAssetsStore } from '@/state/assetsStore';
 import { useProjectStore } from '@/state/projectStore';
 import { useUIStore } from '@/state/uiStore';
 import type { Asset, AssetTab } from '@/types';
@@ -25,27 +26,40 @@ const TABS: ReadonlyArray<{ id: AssetTab; label: string; icon: typeof FilmIcon |
   { id: 'image', label: 'Image', icon: ImageIcon },
 ];
 
+type SortMode = 'recent' | 'name' | 'size';
+
+const SORT_OPTIONS: ReadonlyArray<{ id: SortMode; label: string }> = [
+  { id: 'recent', label: 'Most recent' },
+  { id: 'name', label: 'Name (A→Z)' },
+  { id: 'size', label: 'Size (largest)' },
+];
+
 export function AssetBrowser() {
   const tab = useUIStore((s) => s.assetTab);
   const setTab = useUIStore((s) => s.setAssetTab);
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SortMode>('recent');
 
   const workspaceId = useProjectStore((s) => s.project?.workspace ?? null);
   const upload = useAssetUpload(workspaceId);
+  const { loading, error } = useAssetsHydration(workspaceId);
+  const items = useAssetsStore((s) => s.items);
 
-  // Counts are over the full asset list (not the active tab) — matches the
-  // prototype where the badge next to each tab always shows total of that type.
+  // Counts come from the live list — Filter tabs always show *current* totals.
   const counts = useMemo(
     () => ({
-      all: MOCK_ASSETS.length,
-      video: MOCK_ASSETS.filter((a) => a.type === 'video').length,
-      audio: MOCK_ASSETS.filter((a) => a.type === 'audio').length,
-      image: MOCK_ASSETS.filter((a) => a.type === 'image').length,
+      all: items.length,
+      video: items.filter((a) => a.type === 'video').length,
+      audio: items.filter((a) => a.type === 'audio').length,
+      image: items.filter((a) => a.type === 'image').length,
     }),
-    [],
+    [items],
   );
 
-  const visible = useMemo(() => filterAssets(MOCK_ASSETS, tab, query), [tab, query]);
+  const visible = useMemo(
+    () => sortAssets(filterAssets(items, tab, query), sort),
+    [items, tab, query, sort],
+  );
   const inProgress = visible.filter((a) => a.status !== 'ready');
   const ready = visible.filter((a) => a.status === 'ready');
 
@@ -53,15 +67,7 @@ export function AssetBrowser() {
     <div className="flex h-full min-h-0 flex-col">
       <PanelHead
         title="Assets"
-        tools={
-          <button
-            type="button"
-            title="Filter"
-            className="grid h-6 w-6 place-items-center rounded text-text-3 hover:bg-surface-3 hover:text-text-1"
-          >
-            <SlidersHorizontalIcon size={12} />
-          </button>
-        }
+        tools={<SortMenu value={sort} onChange={setSort} />}
       />
 
       {/* Tabs */}
@@ -127,6 +133,14 @@ export function AssetBrowser() {
 
       {/* List */}
       <div className="flex-1 overflow-y-auto px-2 pb-3 pt-1">
+        {loading && items.length === 0 && (
+          <div className="px-2 py-8 text-center text-[11px] text-text-4">Loading assets…</div>
+        )}
+        {error && (
+          <div className="mx-2 mb-2 rounded border border-danger/40 bg-danger/10 px-2 py-1.5 text-[11px] text-danger">
+            {error}
+          </div>
+        )}
         {inProgress.length > 0 && (
           <>
             <SectionTitle>In progress · {inProgress.length}</SectionTitle>
@@ -143,9 +157,9 @@ export function AssetBrowser() {
             ))}
           </>
         )}
-        {visible.length === 0 && (
+        {!loading && visible.length === 0 && (
           <div className="px-2 py-8 text-center text-[11px] text-text-4">
-            No assets match “{query}”.
+            {query ? `No assets match “${query}”.` : 'No assets yet — upload one to start.'}
           </div>
         )}
       </div>
@@ -161,6 +175,68 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+interface SortMenuProps {
+  value: SortMode;
+  onChange: (mode: SortMode) => void;
+}
+
+function SortMenu({ value, onChange }: SortMenuProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Click-outside close
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        title="Sort assets"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          'grid h-6 w-6 place-items-center rounded text-text-3 hover:bg-surface-3 hover:text-text-1',
+          open && 'bg-surface-3 text-text-1',
+        )}
+      >
+        <SlidersHorizontalIcon size={12} />
+      </button>
+      {open && (
+        <div
+          className={cn(
+            'absolute right-0 top-7 z-30 w-36 overflow-hidden rounded-md border border-line',
+            'bg-surface-2 py-1 shadow-lg',
+          )}
+        >
+          {SORT_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => {
+                onChange(opt.id);
+                setOpen(false);
+              }}
+              className={cn(
+                'flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px]',
+                value === opt.id ? 'text-accent' : 'text-text-2 hover:bg-surface-3 hover:text-text-1',
+              )}
+            >
+              {opt.label}
+              {value === opt.id && <span className="text-accent">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function filterAssets(
   all: readonly Asset[],
   tab: AssetTab,
@@ -170,4 +246,29 @@ function filterAssets(
   const q = query.trim().toLowerCase();
   if (q) out = out.filter((a) => a.name.toLowerCase().includes(q));
   return out;
+}
+
+function sortAssets(all: readonly Asset[], mode: SortMode): readonly Asset[] {
+  const copy = [...all];
+  switch (mode) {
+    case 'name':
+      return copy.sort((a, b) => a.name.localeCompare(b.name));
+    case 'size': {
+      // Parse the human size back into a sortable number — assets are formatted
+      // as "184 MB" / "1.2 GB" / "9.6 KB". For sorting we just rank by unit.
+      const score = (s: string): number => {
+        const n = parseFloat(s);
+        if (s.includes('GB')) return n * 1024 * 1024 * 1024;
+        if (s.includes('MB')) return n * 1024 * 1024;
+        if (s.includes('KB')) return n * 1024;
+        return n;
+      };
+      return copy.sort((a, b) => score(b.size) - score(a.size));
+    }
+    case 'recent':
+    default:
+      // Hydration returns assets in insertion order from the API, which is
+      // already DESC by id (UUID v7 → time-sortable). Keep that.
+      return copy;
+  }
 }
