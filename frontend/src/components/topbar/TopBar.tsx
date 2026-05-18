@@ -1,8 +1,10 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   CloudIcon,
   DownloadIcon,
   HistoryIcon,
   KeyboardIcon,
+  LogOutIcon,
   MoonIcon,
   RedoIcon,
   Share2Icon,
@@ -11,6 +13,7 @@ import {
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/state/authStore';
 import {
   selectTotalDurationMs,
   useProjectStore,
@@ -157,6 +160,7 @@ export function TopBar() {
         >
           <KeyboardIcon size={14} />
         </IconBtn>
+        <UserMenu />
         <button
           type="button"
           onClick={handleShare}
@@ -211,5 +215,78 @@ function IconBtn({ title, children, disabled, active, onClick }: IconBtnProps) {
     >
       {children}
     </button>
+  );
+}
+
+/** Avatar + click-to-open menu with the signed-in email and a Logout action. */
+function UserMenu() {
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  if (!user) return null;
+
+  const initials = (user.display_name || user.email)
+    .split(/\s+|@/)
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        title={user.email}
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          'grid h-7 w-7 place-items-center rounded-full bg-surface-3 text-[10px] font-semibold',
+          'text-text-1 hover:bg-surface-3/80',
+          open && 'ring-1 ring-accent',
+        )}
+      >
+        {initials || '?'}
+      </button>
+      {open && (
+        <div
+          className={cn(
+            'absolute right-0 top-9 z-40 w-56 overflow-hidden rounded-md border border-line',
+            'bg-surface-2 py-1 shadow-lg',
+          )}
+        >
+          <div className="px-3 py-2">
+            <div className="truncate text-xs font-medium text-text-1">
+              {user.display_name}
+            </div>
+            <div className="truncate text-[10px] text-text-3">{user.email}</div>
+          </div>
+          <div className="my-1 h-px bg-line" />
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              void logout();
+            }}
+            className={cn(
+              'flex w-full items-center gap-2 px-3 py-2 text-left text-xs',
+              'text-text-2 hover:bg-surface-3 hover:text-text-1',
+            )}
+          >
+            <LogOutIcon size={13} /> Sign out
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

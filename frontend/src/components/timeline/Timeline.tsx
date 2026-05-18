@@ -33,7 +33,7 @@ export function Timeline() {
   const splitClipAt = useProjectStore((s) => s.splitClipAt);
   const addClip = useProjectStore((s) => s.addClip);
 
-  const visibleTrackIds = useUIStore((s) => s.visibleTrackIds);
+  const trackPreset = useUIStore((s) => s.trackPreset);
   const selectedIds = useUIStore((s) => s.selectedClipIds);
   const selectClip = useUIStore((s) => s.selectClip);
   const zoomLevel = useUIStore((s) => s.zoomLevel);
@@ -61,10 +61,26 @@ export function Timeline() {
   const majorSec = pps >= 80 ? 1 : pps >= 40 ? 2 : 5;
   const rowGridPx = majorSec * pps;
 
-  const visibleTracks = useMemo(
-    () => tracks.filter((t) => visibleTrackIds.includes(t.id)),
-    [tracks, visibleTrackIds],
-  );
+  // Track presets filter by *type*, not by hard-coded ID — so they survive
+  // backend-driven UUIDs. `track.visible` (eye toggle) hides individual rows
+  // on top of that and is handled deeper in the render loop.
+  const visibleTracks = useMemo(() => {
+    switch (trackPreset) {
+      case 'minimal': {
+        const v = tracks.find((t) => t.type === 'video');
+        const a = tracks.find((t) => t.type === 'audio');
+        return [v, a].filter((t): t is Track => Boolean(t));
+      }
+      case 'audio-heavy': {
+        const v = tracks.find((t) => t.type === 'video');
+        const audios = tracks.filter((t) => t.type === 'audio');
+        return [v, ...audios].filter((t): t is Track => Boolean(t));
+      }
+      case 'demo':
+      default:
+        return tracks;
+    }
+  }, [tracks, trackPreset]);
 
   // Horizontal scroll observed by the ruler so its click-to-seek math accounts
   // for the offset; rows + playhead share the same scroll container naturally.

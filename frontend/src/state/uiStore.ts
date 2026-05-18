@@ -59,7 +59,6 @@ export interface UIState {
   clipStyle: ClipStyle;
   showPresence: boolean;
   trackPreset: TrackPreset;
-  visibleTrackIds: readonly UUID[];
 
   // ── Theme ─────────────────────────────────────────────────────────────────
   theme: Theme;
@@ -87,7 +86,7 @@ export interface UIState {
 
   setClipStyle: (style: ClipStyle) => void;
   setShowPresence: (on: boolean) => void;
-  setTrackPreset: (preset: TrackPreset, allTrackIds: readonly UUID[]) => void;
+  setTrackPreset: (preset: TrackPreset) => void;
 
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
@@ -117,7 +116,6 @@ export const useUIStore = create<UIState>()((set) => ({
   clipStyle: 'rich',
   showPresence: true,
   trackPreset: 'demo',
-  visibleTrackIds: ['tr_v1', 'tr_v2', 'tr_a1', 'tr_a2'],
 
   theme: initialTheme,
 
@@ -153,14 +151,7 @@ export const useUIStore = create<UIState>()((set) => ({
   // ── Tweaks ───────────────────────────────────────────────────────────────
   setClipStyle: (style) => set({ clipStyle: style }),
   setShowPresence: (on) => set({ showPresence: on }),
-  setTrackPreset: (preset, allTrackIds) => {
-    const presets: Record<TrackPreset, readonly UUID[]> = {
-      demo: allTrackIds,
-      minimal: ['tr_v1', 'tr_a1'],
-      'audio-heavy': ['tr_v1', 'tr_a1', 'tr_a2'],
-    };
-    set({ trackPreset: preset, visibleTrackIds: presets[preset] });
-  },
+  setTrackPreset: (preset) => set({ trackPreset: preset }),
 
   // ── Theme ────────────────────────────────────────────────────────────────
   setTheme: (theme) => {
