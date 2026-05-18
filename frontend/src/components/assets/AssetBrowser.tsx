@@ -10,7 +10,9 @@ import {
 
 import { cn } from '@/lib/utils';
 import { PanelHead } from '@/components/shared/PanelHead';
+import { useAssetUpload } from '@/hooks/useAssetUpload';
 import { MOCK_ASSETS } from '@/mocks/cloudcut';
+import { useProjectStore } from '@/state/projectStore';
 import { useUIStore } from '@/state/uiStore';
 import type { Asset, AssetTab } from '@/types';
 
@@ -27,6 +29,9 @@ export function AssetBrowser() {
   const tab = useUIStore((s) => s.assetTab);
   const setTab = useUIStore((s) => s.setAssetTab);
   const [query, setQuery] = useState('');
+
+  const workspaceId = useProjectStore((s) => s.project?.workspace ?? null);
+  const upload = useAssetUpload(workspaceId);
 
   // Counts are over the full asset list (not the active tab) — matches the
   // prototype where the badge next to each tab always shows total of that type.
@@ -101,14 +106,23 @@ export function AssetBrowser() {
         </div>
         <button
           type="button"
-          title="Upload"
+          title={upload.state.uploading ? `Uploading… ${Math.round(upload.state.progress * 100)}%` : 'Upload'}
+          onClick={upload.openPicker}
+          disabled={upload.state.uploading || !workspaceId}
           className={cn(
             'grid h-7 w-7 place-items-center rounded-md border border-dashed border-line bg-surface-2',
-            'text-text-2 hover:border-accent hover:text-accent',
+            'text-text-2 hover:border-accent hover:text-accent disabled:opacity-50',
           )}
         >
           <UploadIcon size={14} />
         </button>
+        <input
+          ref={upload.inputRef}
+          type="file"
+          accept="video/*,audio/*,image/*"
+          onChange={upload.onPickerChange}
+          className="hidden"
+        />
       </div>
 
       {/* List */}

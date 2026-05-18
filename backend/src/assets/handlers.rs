@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use redis::AsyncCommands;
 use std::time::Duration;
 use uuid::Uuid;
 use validator::Validate;
@@ -195,7 +196,30 @@ pub async fn update_asset_status(
     .fetch_one(&state.db)
     .await?;
 
+    // When the client signals upload completion, hand the asset to the worker.
+    if req.status == "processing" {
+        if let Err(e) = enqueue_processing(&state, asset_id).await {
+            tracing::warn!(%asset_id, error=%e, "asset enqueue failed (worker won't pick up)");
+        }
+    }
+
     Ok(Json(row))
+}
+
+const ASSETS_STREAM: &str = "cloudcut:assets";
+
+async fn enqueue_processing(state: &AppState, asset_id: Uuid) -> Result<(), AppError> {
+    let mut conn = state
+        .redis
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| AppError::internal(format!("redis connect: {e}")))?;
+    let id: String = conn
+        .xadd(ASSETS_STREAM, "*", &[("asset_id", asset_id.to_string())])
+        .await
+        .map_err(|e| AppError::internal(format!("xadd: {e}")))?;
+    tracing::info!(%asset_id, stream_id=%id, "asset enqueued for processing");
+    Ok(())
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

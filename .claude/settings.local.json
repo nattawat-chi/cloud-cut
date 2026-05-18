@@ -22,7 +22,13 @@
       "Bash(gh --version)",
       "Bash(gh auth *)",
       "Bash(git init *)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "PowerShell($env:PATH += \";$env:USERPROFILE\\\\.cargo\\\\bin\"; cd \"C:\\\\Users\\\\Cobalt\\\\Desktop\\\\new-projects\\\\cloud-cut-readiness-test\"; Write-Output \"=== cargo backend ===\"; cargo build -p backend 2>&1 | Select-Object -Last 5; Write-Output \"\"; cd frontend; Write-Output \"=== pnpm typecheck ===\"; pnpm typecheck 2>&1 | Select-Object -Last 10)",
+      "PowerShell(cd \"C:\\\\Users\\\\Cobalt\\\\Desktop\\\\new-projects\\\\cloud-cut-readiness-test\"; foreach \\($f in @\\(\"docker/postgres/init.sql\", \"backend/migrations/0001_init.sql\", \"backend/migrations/0002_indexes.sql\", \"backend/migrations/0003_seed.sql\"\\)\\) { Write-Output \"=== applying $f ===\"; Get-Content $f -Raw | docker exec -i cloudcut-postgres psql -U cloudcut -d cloudcut 2>&1 | Select-Object -Last 3 })",
+      "PowerShell(docker exec -i cloudcut-postgres psql -U cloudcut -d cloudcut -c \"UPDATE users SET password_hash = '`$argon2id`$v=19`$m=19456,t=2,p=1`$rjiy0AsmSYidiTnvGd77Zw`$9ftmhIrEjSKniTzQC5mXx4h6xtxo09INEhKSn8EsvzE' WHERE email IN \\('alice@cloudcut.dev', 'mira@cloudcut.dev'\\); SELECT email, length\\(password_hash\\) FROM users;\" 2>&1)",
+      "Bash(curl -s http://localhost:8080/api/v1/health)",
+      "Bash(sed -i 's/trim_in_ms, trim_out_ms,\\\\n.*speed, name, version/X/g' backend/src/timeline/handlers.rs)",
+      "Bash(grep -n \"speed, name, version\\\\|speed,$\\\\|ce.value\\\\|, value, enabled\" backend/src/timeline/handlers.rs)"
     ]
   }
 }
