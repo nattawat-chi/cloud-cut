@@ -247,13 +247,15 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     })),
 
   addClip: ({ trackId, assetId, posMs, durMs, name, thumbs }) => {
-    const id = uid('c');
+    // Optimistic local insert with a temp id so the UI responds instantly.
+    // Server returns the real UUID; we swap the temp id in-place once it lands.
+    const tmpId = uid('c-tmp');
     set((s) => ({
       ...pushSnapshot(s),
       clips: [
         ...s.clips,
         {
-          id,
+          id: tmpId,
           trackId,
           assetId,
           name,
@@ -267,10 +269,31 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
         },
       ],
     }));
-    return id;
+
+    // Persist — if this fails the clip stays in local state but won't reappear
+    // after reload. Logging is enough; the toast system would be too noisy
+    // for the fast drag-drop path.
+    void timelineApi
+      .addClip(trackId, {
+        asset_id: assetId,
+        pos_ms: Math.max(0, posMs),
+        dur_ms: Math.max(400, durMs),
+        name,
+      })
+      .then((serverClip) => {
+        set((s) => ({
+          clips: s.clips.map((c) =>
+            c.id === tmpId ? { ...c, id: serverClip.id } : c,
+          ),
+        }));
+      })
+      .catch((e) => {
+        console.warn('addClip persist failed:', e);
+      });
+    return tmpId;
   },
 
-  moveClip: (clipId, newPosMs, newTrackId) =>
+  moveClip: (clipId, newPosMs, newTrackId) => {
     set((s) => ({
       ...pushSnapshot(s),
       clips: s.clips.map((c) =>
@@ -283,9 +306,19 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
             }
           : c,
       ),
-    })),
+    }));
+    // Don't PATCH temp-id clips — addClip's promise will land first and
+    // remap them; until then there's no server-side row to update.
+    if (clipId.startsWith('c-tmp')) return;
+    void timelineApi
+      .updateClip(clipId, {
+        pos_ms: Math.max(0, newPosMs),
+        ...(newTrackId ? { track_id: newTrackId } : {}),
+      })
+      .catch((e) => console.warn('moveClip persist failed:', e));
+  },
 
-  resizeClip: (clipId, newPosMs, newDurMs) =>
+  resizeClip: (clipId, newPosMs, newDurMs) => {
     set((s) => ({
       ...pushSnapshot(s),
       clips: s.clips.map((c) =>
@@ -298,7 +331,15 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
             }
           : c,
       ),
-    })),
+    }));
+    if (clipId.startsWith('c-tmp')) return;
+    void timelineApi
+      .updateClip(clipId, {
+        pos_ms: Math.max(0, newPosMs),
+        dur_ms: Math.max(400, newDurMs),
+      })
+      .catch((e) => console.warn('resizeClip persist failed:', e));
+  },
 
   trimClip: (clipId, _side, newDurMs) =>
     set((s) => ({
@@ -333,7 +374,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       return { ...pushSnapshot(s), clips: out };
     }),
 
-  deleteClips: (clipIds) =>
+  deleteClips: (clipIds) => {
     set((s) => {
       const drop = new Set(clipIds);
       if (drop.size === 0) return {};
@@ -344,7 +385,16 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
         clips: s.clips.filter((c) => !drop.has(c.id)),
         effects: nextEffects,
       };
-    }),
+    });
+    // Fire-and-forget DELETEs in parallel. Temp-id clips don't have a server
+    // row yet (addClip may still be in flight) — skip them.
+    for (const id of clipIds) {
+      if (id.startsWith('c-tmp')) continue;
+      void timelineApi
+        .deleteClip(id)
+        .catch((e) => console.warn(`deleteClip(${id}) persist failed:`, e));
+    }
+  },
 
   addEffect: (clipId, type) =>
     set((s) => {

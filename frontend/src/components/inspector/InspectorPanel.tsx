@@ -2,7 +2,8 @@ import { LayersIcon, MousePointerIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { PanelHead } from '@/components/shared/PanelHead';
-import { MOCK_ASSET_INDEX } from '@/mocks/cloudcut';
+import { MOCK_ASSET_INDEX as MOCK_ASSET_INDEX_FALLBACK } from '@/mocks/cloudcut';
+import { useAssetsStore } from '@/state/assetsStore';
 import {
   selectClipById,
   useProjectStore,
@@ -63,7 +64,11 @@ export function InspectorPanel() {
     );
   }
 
-  const asset = MOCK_ASSET_INDEX[clip.assetId];
+  // Real assets come from assetsStore (workspace-scoped, populated by API).
+  // The mock index is only useful when projectStore.loadMockProject() is in
+  // effect, which is the offline fallback.
+  const liveAsset = useAssetsStore((s) => s.byId[clip.assetId]);
+  const asset = liveAsset ?? MOCK_ASSET_INDEX_FALLBACK[clip.assetId];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
