@@ -29,7 +29,7 @@ use utoipa::{
         crate::projects::update_project,
         crate::projects::delete_project,
         // Collaboration — offline reconnect sync (§4.5)
-        crate::collaboration::list_operations,
+        crate::collaboration::sync::list_operations,
     ),
     components(
         schemas(
@@ -42,8 +42,8 @@ use utoipa::{
             crate::projects::CreateProjectBody,
             crate::projects::UpdateProjectBody,
             crate::projects::ProjectPayload,
-            crate::collaboration::OperationEntry,
-            crate::collaboration::OperationsResponse,
+            crate::collaboration::dto::OperationEntry,
+            crate::collaboration::dto::OperationsResponse,
         )
     ),
     tags(
