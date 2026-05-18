@@ -18,5 +18,13 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // Proxy /api → backend so the frontend can call relative URLs in dev
+    // and avoid CORS preflights. Production deploys both behind one origin.
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_PROXY ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
   },
 });

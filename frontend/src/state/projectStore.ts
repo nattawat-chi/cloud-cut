@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import { projects as projectsApi, timeline as timelineApi } from '@/services/api';
 import type {
   Clip,
   ClipEffect,
@@ -31,11 +32,10 @@ export interface ProjectState {
   effects: Readonly<Record<UUID, readonly ClipEffect[]>>;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
-  /**
-   * Hydrate from the mock fixture. Replaced by `loadProject(id)` calling the
-   * REST API once Phase 3 lands. Idempotent — safe to call from <App> mount.
-   */
+  /** Hydrate from the in-memory mock fixture (dev fallback). */
   loadMockProject: () => void;
+  /** Hydrate from the backend — fetches `/projects/:id` + `/projects/:id/timeline`. */
+  loadProjectFromApi: (projectId: UUID) => Promise<void>;
 
   // ── Tracks ────────────────────────────────────────────────────────────────
   toggleTrack: (trackId: UUID, key: 'muted' | 'locked' | 'visible') => void;
@@ -84,6 +84,73 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       clips: MOCK_CLIPS,
       effects: MOCK_EFFECTS,
     }),
+
+  loadProjectFromApi: async (projectId) => {
+    const [project, snapshot] = await Promise.all([
+      projectsApi.get(projectId),
+      timelineApi.get(projectId),
+    ]);
+
+    const tracks: Track[] = snapshot.tracks
+      .filter((t) => t.kind === 'video' || t.kind === 'audio')
+      .map((t, i) => {
+        const isVideo = t.kind === 'video';
+        // Alternate colour vars within each track type
+        const colorVar = isVideo
+          ? i % 2 === 0 ? ('--clip-v-1' as const) : ('--clip-v-2' as const)
+          : i % 2 === 0 ? ('--clip-a-1' as const) : ('--clip-a-2' as const);
+        const tag = `${isVideo ? 'V' : 'A'}${Math.floor(i / 2) + 1}`;
+        return {
+          id: t.id,
+          type: isVideo ? 'video' : 'audio',
+          label: `${tag} · ${t.name}`,
+          tag,
+          colorVar,
+          muted: t.muted,
+          locked: t.locked,
+          visible: true,
+        };
+      });
+
+    const clips: Clip[] = snapshot.clips.map((c) => ({
+      id: c.id,
+      trackId: c.track_id,
+      assetId: c.asset_id ?? '',
+      name: c.name,
+      posMs: c.pos_ms,
+      durMs: c.dur_ms,
+      inPointMs: c.trim_in_ms,
+      outPointMs: c.trim_in_ms + c.dur_ms,
+      transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+      version: c.version,
+    }));
+
+    const effects: Record<UUID, ClipEffect[]> = {};
+    for (const [clipId, list] of Object.entries(snapshot.effects)) {
+      effects[clipId] = list
+        .filter((fx) => (['brightness', 'contrast', 'saturation', 'blur'] as const).includes(fx.type as EffectType))
+        .map((fx) => ({
+          id: fx.id,
+          type: fx.type as EffectType,
+          enabled: fx.enabled,
+          value: fx.value,
+        }));
+    }
+
+    set({
+      project: {
+        id: project.id,
+        name: project.name,
+        workspace: project.workspace_id,
+        fps: project.fps,
+        resolution: `${project.resolution_w}×${project.resolution_h}`,
+        durationMs: project.duration_ms,
+      },
+      tracks,
+      clips,
+      effects,
+    });
+  },
 
   toggleTrack: (trackId, key) =>
     set((s) => ({

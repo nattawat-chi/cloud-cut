@@ -46,8 +46,8 @@ pub async fn list_assets(
 
     let mut items = sqlx::query_as::<_, AssetRow>(
         r#"
-        SELECT id, workspace_id, name, kind, size_bytes, duration_ms, width, height,
-               original_key, status, uploaded_by, created_at
+        SELECT id, workspace_id, name, kind::text AS kind, size_bytes, duration_ms, width, height,
+               original_key, status::text AS status, uploaded_by, created_at
         FROM assets
         WHERE workspace_id = $1
           AND ($2::text IS NULL OR kind = $2::asset_kind)
@@ -182,8 +182,8 @@ pub async fn update_asset_status(
             width       = COALESCE($4, width),
             height      = COALESCE($5, height)
         WHERE id = $6
-        RETURNING id, workspace_id, name, kind, size_bytes, duration_ms, width, height,
-                  original_key, status, uploaded_by, created_at
+        RETURNING id, workspace_id, name, kind::text AS kind, size_bytes, duration_ms, width, height,
+                  original_key, status::text AS status, uploaded_by, created_at
         "#,
     )
     .bind(&req.status)

@@ -28,7 +28,7 @@ pub async fn run(
 
     // ── 1. Fetch asset row ──────────────────────────────────────────────────
     let row: Option<(String, String)> =
-        sqlx::query_as("SELECT original_key, kind FROM assets WHERE id = $1")
+        sqlx::query_as("SELECT original_key, kind::text AS kind FROM assets WHERE id = $1")
             .bind(asset_id)
             .fetch_optional(db)
             .await?;

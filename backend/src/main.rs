@@ -12,6 +12,7 @@ mod projects;
 mod pusher;
 mod state;
 mod timeline;
+mod workspaces;
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -73,6 +74,7 @@ pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .nest("/auth", auth::router())
+        .merge(workspaces::router())
         .merge(projects::router())
         .merge(timeline::router())
         .merge(assets::router())

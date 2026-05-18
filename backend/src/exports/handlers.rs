@@ -51,7 +51,7 @@ pub async fn create_export(
         r#"
         INSERT INTO export_jobs (project_id, requested_by, format, resolution)
         VALUES ($1, $2, $3::export_format, $4::export_resolution)
-        RETURNING id, project_id, requested_by, status, format, resolution, output_key,
+        RETURNING id, project_id, requested_by, status::text AS status, format::text AS format, resolution::text AS resolution, output_key,
                   progress_pct, error_msg, started_at, finished_at, created_at
         "#,
     )
@@ -79,7 +79,7 @@ pub async fn get_export(
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<ExportJobRow>, AppError> {
     let job = sqlx::query_as::<_, ExportJobRow>(
-        r#"SELECT id, project_id, requested_by, status, format, resolution, output_key,
+        r#"SELECT id, project_id, requested_by, status::text AS status, format::text AS format, resolution::text AS resolution, output_key,
                   progress_pct, error_msg, started_at, finished_at, created_at
            FROM export_jobs WHERE id = $1"#,
     )
@@ -102,7 +102,7 @@ pub async fn list_exports(
     require_project_access(&state, project_id, auth.user_id).await?;
 
     let jobs = sqlx::query_as::<_, ExportJobRow>(
-        r#"SELECT id, project_id, requested_by, status, format, resolution, output_key,
+        r#"SELECT id, project_id, requested_by, status::text AS status, format::text AS format, resolution::text AS resolution, output_key,
                   progress_pct, error_msg, started_at, finished_at, created_at
            FROM export_jobs
            WHERE project_id = $1

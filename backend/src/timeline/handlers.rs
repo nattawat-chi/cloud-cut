@@ -77,7 +77,7 @@ pub async fn create_track(
         INSERT INTO tracks (project_id, kind, name, position)
         VALUES ($1, $2::track_kind, $3, COALESCE($4,
             (SELECT COALESCE(MAX(position), -1) + 1 FROM tracks WHERE project_id = $1)))
-        RETURNING id, project_id, kind, name, position, muted, locked, created_at
+        RETURNING id, project_id, kind::text AS kind, name, position, muted, locked, created_at
         "#,
     )
     .bind(project_id)
@@ -107,7 +107,7 @@ pub async fn update_track(
             locked   = COALESCE($3, locked),
             position = COALESCE($4, position)
         WHERE id = $5
-        RETURNING id, project_id, kind, name, position, muted, locked, created_at
+        RETURNING id, project_id, kind::text AS kind, name, position, muted, locked, created_at
         "#,
     )
     .bind(req.name.as_deref())
@@ -154,7 +154,7 @@ pub async fn add_clip(
         INSERT INTO clips (track_id, asset_id, pos_ms, dur_ms, name)
         VALUES ($1, $2, $3, $4, $5)
         RETURNING id, track_id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms,
-                  speed, name, version, created_at, updated_at
+                  speed::float8 AS speed, name, version, created_at, updated_at
         "#,
     )
     .bind(track_id)
@@ -199,7 +199,7 @@ pub async fn update_clip(
             version     = version + 1
         WHERE id = $7
         RETURNING id, track_id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms,
-                  speed, name, version, created_at, updated_at
+                  speed::float8 AS speed, name, version, created_at, updated_at
         "#,
     )
     .bind(target_track)
@@ -272,7 +272,7 @@ pub async fn split_clip(
         r#"
         UPDATE clips SET dur_ms = $1, version = version + 1 WHERE id = $2
         RETURNING id, track_id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms,
-                  speed, name, version, created_at, updated_at
+                  speed::float8 AS speed, name, version, created_at, updated_at
         "#,
     )
     .bind(req.split_at_ms)
@@ -286,7 +286,7 @@ pub async fn split_clip(
         INSERT INTO clips (track_id, asset_id, pos_ms, dur_ms, trim_in_ms, name)
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, track_id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms,
-                  speed, name, version, created_at, updated_at
+                  speed::float8 AS speed, name, version, created_at, updated_at
         "#,
     )
     .bind(original.track_id)
@@ -326,7 +326,7 @@ pub async fn add_effect(
         INSERT INTO clip_effects (clip_id, type, value, position)
         VALUES ($1, $2::effect_type, $3,
             COALESCE($4, (SELECT COALESCE(MAX(position), -1) + 1 FROM clip_effects WHERE clip_id = $1)))
-        RETURNING id, clip_id, type, value, enabled, position, created_at
+        RETURNING id, clip_id, type::text AS type, value::float8 AS value, enabled, position, created_at
         "#,
     )
     .bind(clip_id)
@@ -355,7 +355,7 @@ pub async fn update_effect(
             enabled  = COALESCE($2, enabled),
             position = COALESCE($3, position)
         WHERE id = $4
-        RETURNING id, clip_id, type, value, enabled, position, created_at
+        RETURNING id, clip_id, type::text AS type, value::float8 AS value, enabled, position, created_at
         "#,
     )
     .bind(req.value)
@@ -452,7 +452,7 @@ async fn effect_project_clip(
 async fn fetch_clip(state: &AppState, clip_id: Uuid) -> Result<ClipRow, AppError> {
     sqlx::query_as::<_, ClipRow>(
         "SELECT id, track_id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms,
-                speed, name, version, created_at, updated_at
+                speed::float8 AS speed, name, version, created_at, updated_at
          FROM clips WHERE id = $1",
     )
     .bind(clip_id)
@@ -463,7 +463,7 @@ async fn fetch_clip(state: &AppState, clip_id: Uuid) -> Result<ClipRow, AppError
 
 async fn fetch_tracks(state: &AppState, project_id: Uuid) -> Result<Vec<TrackRow>, AppError> {
     Ok(sqlx::query_as::<_, TrackRow>(
-        "SELECT id, project_id, kind, name, position, muted, locked, created_at
+        "SELECT id, project_id, kind::text AS kind, name, position, muted, locked, created_at
          FROM tracks WHERE project_id = $1 ORDER BY position",
     )
     .bind(project_id)
@@ -477,7 +477,7 @@ async fn fetch_clips_for_project(
 ) -> Result<Vec<ClipRow>, AppError> {
     Ok(sqlx::query_as::<_, ClipRow>(
         r#"SELECT c.id, c.track_id, c.asset_id, c.pos_ms, c.dur_ms, c.trim_in_ms, c.trim_out_ms,
-                  c.speed, c.name, c.version, c.created_at, c.updated_at
+                  c.speed::float8 AS speed, c.name, c.version, c.created_at, c.updated_at
            FROM clips c
            JOIN tracks t ON t.id = c.track_id
            WHERE t.project_id = $1
@@ -493,7 +493,7 @@ async fn fetch_effects_for_project(
     project_id: Uuid,
 ) -> Result<Vec<EffectRow>, AppError> {
     Ok(sqlx::query_as::<_, EffectRow>(
-        r#"SELECT ce.id, ce.clip_id, ce.type, ce.value, ce.enabled, ce.position, ce.created_at
+        r#"SELECT ce.id, ce.clip_id, ce.type::text AS type, ce.value::float8 AS value, ce.enabled, ce.position, ce.created_at
            FROM clip_effects ce
            JOIN clips c ON c.id = ce.clip_id
            JOIN tracks t ON t.id = c.track_id

@@ -10,20 +10,21 @@
 
 -- ─── Users ────────────────────────────────────────────────────────────────────
 
+-- Both seed accounts share the password "password123". The hash below was
+-- produced by `cargo run -p backend --example gen_hash -- password123` so it
+-- verifies against the real Argon2id verifier in auth/handlers.rs.
 INSERT INTO users (id, email, password_hash, display_name, avatar_url) VALUES
 (
   '00000000-0000-0000-0000-000000000001',
   'alice@cloudcut.dev',
-  -- plaintext: "password123"
-  '$argon2id$v=19$m=32768,t=2,p=1$Y2xvdWRjdXRzYWx0MDE$X9p8LmKvQwZnRtSdUeJfNgHiBkCaVxYoMpWlTqEhIuA',
+  '$argon2id$v=19$m=19456,t=2,p=1$rjiy0AsmSYidiTnvGd77Zw$9ftmhIrEjSKniTzQC5mXx4h6xtxo09INEhKSn8EsvzE',
   'Alice Chen',
   'https://api.dicebear.com/8.x/avataaars/svg?seed=alice'
 ),
 (
   '00000000-0000-0000-0000-000000000002',
   'mira@cloudcut.dev',
-  -- plaintext: "password123"
-  '$argon2id$v=19$m=32768,t=2,p=1$Y2xvdWRjdXRzYWx0MDI$A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v',
+  '$argon2id$v=19$m=19456,t=2,p=1$rjiy0AsmSYidiTnvGd77Zw$9ftmhIrEjSKniTzQC5mXx4h6xtxo09INEhKSn8EsvzE',
   'Mira Santos',
   'https://api.dicebear.com/8.x/avataaars/svg?seed=mira'
 );

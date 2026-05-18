@@ -12,6 +12,8 @@
 
 import Pusher from 'pusher-js';
 
+import { useAuthStore } from '@/state/authStore';
+
 const KEY = import.meta.env.VITE_PUSHER_KEY as string | undefined;
 const CLUSTER = (import.meta.env.VITE_PUSHER_CLUSTER as string | undefined) ?? 'mt1';
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api/v1';
@@ -22,16 +24,38 @@ export function getPusher(): Pusher | null {
   if (!KEY) return null;
   if (instance) return instance;
 
-  // pusher-js logs verbosely; enable only when explicitly asked.
   Pusher.logToConsole = import.meta.env.DEV && import.meta.env.VITE_PUSHER_DEBUG === '1';
 
   instance = new Pusher(KEY, {
     cluster: CLUSTER,
     forceTLS: true,
     authEndpoint: `${API_BASE}/pusher/auth`,
-    auth: {
-      headers: authHeaders(),
-    },
+    // Function form so the latest access token is read on every channel auth
+    // (matters after a token refresh — closure-captured headers would go stale).
+    auth: { headers: {} },
+    authorizer: (channel) => ({
+      authorize: (socketId, callback) => {
+        const token = useAuthStore.getState().accessToken;
+        const body = new URLSearchParams({
+          socket_id: socketId,
+          channel_name: channel.name,
+        });
+        fetch(`${API_BASE}/pusher/auth`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body,
+        })
+          .then(async (r) => {
+            if (!r.ok) throw new Error(`auth ${r.status}`);
+            return r.json();
+          })
+          .then((data) => callback(null, data))
+          .catch((err) => callback(err, null));
+      },
+    }),
   });
 
   return instance;
@@ -50,8 +74,3 @@ export function disconnectPusher(): void {
   }
 }
 
-function authHeaders(): Record<string, string> {
-  const token = import.meta.env.VITE_AUTH_TOKEN as string | undefined;
-  if (!token) return {};
-  return { Authorization: `Bearer ${token}` };
-}

@@ -65,7 +65,7 @@ pub async fn run(
     // ── Load clips ordered by track position + pos_ms ───────────────────────
     let clips: Vec<ClipRow> = sqlx::query_as::<_, ClipRow>(
         r#"
-        SELECT c.pos_ms, c.dur_ms, c.trim_in_ms, c.speed,
+        SELECT c.pos_ms, c.dur_ms, c.trim_in_ms, c.speed::float8 AS speed,
                av.s3_key as proxy_key
         FROM clips c
         JOIN tracks t ON t.id = c.track_id
