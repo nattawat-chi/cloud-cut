@@ -54,7 +54,16 @@ function useRealtime(): void {
   const toast = useHistoryStore((s) => s.toast);
 
   useEffect(() => {
-    if (!isPusherEnabled()) return;
+    // Visible breadcrumbs in the browser console — saves a tedious round of
+    // "is Pusher actually on?" debugging when the avatar group stays empty.
+    if (!isPusherEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info(
+        '[CollabClient] Pusher disabled — VITE_PUSHER_KEY missing. ' +
+          'Add it to .env, then restart `pnpm dev` (Vite reads env at startup).',
+      );
+      return;
+    }
     if (!projectId) return;
     if (!showPresence) return;
 
@@ -62,7 +71,17 @@ function useRealtime(): void {
     if (!pusher) return;
 
     const channelName = `presence-project-${projectId}`;
+    // eslint-disable-next-line no-console
+    console.info('[CollabClient] subscribing to', channelName);
     const channel: Channel = pusher.subscribe(channelName);
+
+    // Catch hard failures (bad key, signature mismatch, network) so the
+    // user sees something concrete instead of a silently empty channel.
+    channel.bind('pusher:subscription_error', (err: unknown) => {
+      // eslint-disable-next-line no-console
+      console.error('[CollabClient] subscription_error', err);
+      toast({ who: 'CloudCut', body: 'Real-time sync failed — see console' });
+    });
 
     // Helper: map Pusher member shape → our Collaborator type
     const mapMember = (m: PresenceMember) => {

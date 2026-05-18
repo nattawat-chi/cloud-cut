@@ -122,11 +122,13 @@ impl PusherClient {
             self.cluster
         );
 
+        tracing::debug!(url = %url, body_len = body.len(), "pusher trigger");
+
         let resp = self
             .http
             .post(&url)
             .header("Content-Type", "application/json")
-            .body(body)
+            .body(body.clone())
             .send()
             .await
             .map_err(|e| AppError::internal(format!("pusher http: {e}")))?;
@@ -134,6 +136,14 @@ impl PusherClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
+            // Surface the exact body that failed signing so we can reproduce
+            // it offline with curl + the right secret.
+            tracing::warn!(
+                status = %status,
+                body = %body,
+                response = %text,
+                "pusher REST rejected request"
+            );
             return Err(AppError::internal(format!("pusher {status}: {text}")));
         }
         Ok(())
