@@ -249,6 +249,10 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   addClip: ({ trackId, assetId, posMs, durMs, name, thumbs }) => {
     // Optimistic local insert with a temp id so the UI responds instantly.
     // Server returns the real UUID; we swap the temp id in-place once it lands.
+    // pxToMs(...) returns floats; round so JSON serialises an integer and
+    // the backend's `i64` deserialiser doesn't reject the payload with 422.
+    const safePos = Math.max(0, Math.round(posMs));
+    const safeDur = Math.max(400, Math.round(durMs));
     const tmpId = uid('c-tmp');
     set((s) => ({
       ...pushSnapshot(s),
@@ -259,10 +263,10 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
           trackId,
           assetId,
           name,
-          posMs: Math.max(0, posMs),
-          durMs: Math.max(400, durMs),
+          posMs: safePos,
+          durMs: safeDur,
           inPointMs: 0,
-          outPointMs: Math.max(400, durMs),
+          outPointMs: safeDur,
           transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
           thumbs,
           version: 1,
@@ -276,8 +280,8 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     void timelineApi
       .addClip(trackId, {
         asset_id: assetId,
-        pos_ms: Math.max(0, posMs),
-        dur_ms: Math.max(400, durMs),
+        pos_ms: safePos,
+        dur_ms: safeDur,
         name,
       })
       .then((serverClip) => {
@@ -294,13 +298,14 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   },
 
   moveClip: (clipId, newPosMs, newTrackId) => {
+    const safePos = Math.max(0, Math.round(newPosMs));
     set((s) => ({
       ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
           ? {
               ...c,
-              posMs: Math.max(0, newPosMs),
+              posMs: safePos,
               trackId: newTrackId ?? c.trackId,
               version: c.version + 1,
             }
@@ -312,21 +317,23 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     if (clipId.startsWith('c-tmp')) return;
     void timelineApi
       .updateClip(clipId, {
-        pos_ms: Math.max(0, newPosMs),
+        pos_ms: safePos,
         ...(newTrackId ? { track_id: newTrackId } : {}),
       })
       .catch((e) => console.warn('moveClip persist failed:', e));
   },
 
   resizeClip: (clipId, newPosMs, newDurMs) => {
+    const safePos = Math.max(0, Math.round(newPosMs));
+    const safeDur = Math.max(400, Math.round(newDurMs));
     set((s) => ({
       ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
           ? {
               ...c,
-              posMs: Math.max(0, newPosMs),
-              durMs: Math.max(400, newDurMs),
+              posMs: safePos,
+              durMs: safeDur,
               version: c.version + 1,
             }
           : c,
@@ -335,21 +342,23 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     if (clipId.startsWith('c-tmp')) return;
     void timelineApi
       .updateClip(clipId, {
-        pos_ms: Math.max(0, newPosMs),
-        dur_ms: Math.max(400, newDurMs),
+        pos_ms: safePos,
+        dur_ms: safeDur,
       })
       .catch((e) => console.warn('resizeClip persist failed:', e));
   },
 
-  trimClip: (clipId, _side, newDurMs) =>
+  trimClip: (clipId, _side, newDurMs) => {
+    const safeDur = Math.max(400, Math.round(newDurMs));
     set((s) => ({
       ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
-          ? { ...c, durMs: Math.max(400, newDurMs), version: c.version + 1 }
+          ? { ...c, durMs: safeDur, version: c.version + 1 }
           : c,
       ),
-    })),
+    }));
+  },
 
   splitClipAt: (clipId, atMs) =>
     set((s) => {
