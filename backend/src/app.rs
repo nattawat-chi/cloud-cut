@@ -1,13 +1,13 @@
 use axum::Router;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::{openapi::ApiDoc, state::AppState};
+use crate::{middleware, openapi::ApiDoc, state::AppState};
 
 pub fn build(state: AppState) -> Router {
     let api_v1 = Router::new()
         .merge(crate::auth::router())
+        .merge(crate::users::router())
         .merge(crate::workspaces::router())
         // collaboration registered before projects so /projects/:id/operations
         // is matched as a static segment before the dynamic :subresource routes.
@@ -24,7 +24,8 @@ pub fn build(state: AppState) -> Router {
             SwaggerUi::new("/api/v1/docs")
                 .url("/api/v1/openapi.json", ApiDoc::openapi()),
         )
-        .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive())
+        .layer(middleware::trace_layer())
+        .layer(middleware::cors_layer())
+        .layer(middleware::request_id_layer())
         .with_state(state)
 }

@@ -1,17 +1,21 @@
 mod app;
-mod auth;
-mod openapi;
 mod assets;
+mod auth;
 mod collaboration;
 mod config;
 mod db;
 mod error;
 mod exports;
+mod jobs;
+mod middleware;
 mod models;
+mod openapi;
 mod projects;
 mod rate_limit;
 mod state;
+mod storage;
 mod timeline;
+mod users;
 mod workspaces;
 
 use std::{net::SocketAddr, sync::Arc};
