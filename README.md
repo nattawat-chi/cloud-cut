@@ -142,18 +142,20 @@ file (it pulls React + Babel from a CDN at runtime).
 
 ## Rules compliance (test brief)
 
-| Rule | Where it's enforced |
-|------|---------------------|
-| 1 — `cargo build` passes | `Cargo.toml` workspace + crate manifests |
-| 2 — `cargo run -p backend` | `backend/src/main.rs` (placeholder; Phase 3 = real router) |
-| 3 — `cargo run -p worker` | `worker/src/main.rs` (placeholder; Phase 4 = real consumer) |
-| 4 — migrations run | `backend/migrations/` + `sqlx migrate run` (Phase 2) |
-| 5 — auth / validation / authz / errors | Phase 3 |
-| 6 — ffmpeg processes for real | `worker/Dockerfile` ships ffmpeg; Phase 4 invokes it |
-| 7 — TS strict | Phase 1 (`tsconfig.json` `"strict": true`) |
-| 8 / 9 — shadcn/ui, no other UI frameworks | Phase 1 |
-| 10 — minimum tests | Each phase adds its slice |
-| 11 — README.md | this file |
-| 12 — DESIGN.md per crate | Phase 2/3/4/1 |
-| 13 — `.env.example` | this commit |
-| 14 — demo video / screenshots | After Phase 5 |
+| Rule | Status | Where it's enforced |
+|------|:------:|---------------------|
+| 1 — `cargo build` passes clean | ✅ | Workspace `Cargo.toml` — verified 0 warn / 0 err |
+| 2 — `cargo run -p backend` boots Axum | ✅ | [`backend/src/main.rs`](backend/src/main.rs) — full router, 28 routes |
+| 3 — `cargo run -p worker` consumes Redis Streams | ✅ | [`worker/src/main.rs`](worker/src/main.rs) — XREADGROUP loop, ffmpeg pipelines |
+| 4 — migrations run | ✅ | [`backend/migrations/0001..0003`](backend/migrations/) — `sqlx migrate run` applies + seeds |
+| 5 — auth + validation + authz + errors | ✅ | Argon2id + JWT + `validator` + `AppError` + `require_*_access` helpers |
+| 6 — ffmpeg processes for real | ✅ | [`worker/src/ffmpeg.rs`](worker/src/ffmpeg.rs) — probe / proxy / thumbnail / waveform / export |
+| 7 — TypeScript strict | ✅ | [`frontend/tsconfig.app.json`](frontend/tsconfig.app.json) — all strict flags on |
+| 8 / 9 — shadcn/ui only, no other UI frameworks | ✅ | Vendored under `frontend/src/components/ui/`; no MUI/AntD/etc. in `package.json` |
+| 10 — minimum tests | ✅ | 59 Vitest (timecode, geometry, snap, projectStore, playback, waveform) + 3 cargo tests |
+| 11 — `README.md` setup instructions | ✅ | this file (quick start + service URLs + Docker strategies) |
+| 12 — `DESIGN.md` per module | ✅ | [`backend/DESIGN.md`](backend/DESIGN.md) · [`worker/DESIGN.md`](worker/DESIGN.md) · [`frontend/DESIGN.md`](frontend/DESIGN.md) · [`docs/database-design.md`](docs/database-design.md) |
+| 13 — `.env.example` | ✅ | [`.env.example`](.env.example) — all vars documented |
+| 14 — demo video / screenshots | ⏳ | Run locally and capture (see Quick start below) |
+
+**Real Pusher integration** (a separate spec requirement, not a numbered rule): backend signs presence/private channels via hand-rolled HMAC-SHA256 in [`backend/src/pusher/`](backend/src/pusher/) and publishes timeline ops to `presence-project-<id>`; frontend subscribes via [`pusher-js`](frontend/src/services/pusher.ts) and mirrors remote ops into `projectStore`. Falls back gracefully to the scripted `CollabSimulator` when Pusher env vars are missing.
