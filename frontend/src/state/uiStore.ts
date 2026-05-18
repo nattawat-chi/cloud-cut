@@ -68,6 +68,7 @@ export interface UIState {
   showShortcuts: boolean;
   showEffectsBrowser: boolean;
   showHistoryPanel: boolean;
+  showExportDialog: boolean;
 
   // ── Actions ───────────────────────────────────────────────────────────────
   selectClip: (id: UUID, additive?: boolean) => void;
@@ -92,6 +93,7 @@ export interface UIState {
   toggleTheme: () => void;
 
   toggleShortcuts: () => void;
+  toggleExportDialog: () => void;
   toggleEffectsBrowser: () => void;
   toggleHistoryPanel: () => void;
 }
@@ -120,6 +122,7 @@ export const useUIStore = create<UIState>()((set) => ({
   theme: initialTheme,
 
   showShortcuts: false,
+  showExportDialog: false,
   showEffectsBrowser: false,
   showHistoryPanel: false,
 
@@ -173,6 +176,7 @@ export const useUIStore = create<UIState>()((set) => ({
 
   // ── Overlays ─────────────────────────────────────────────────────────────
   toggleShortcuts: () => set((s) => ({ showShortcuts: !s.showShortcuts })),
+  toggleExportDialog: () => set((s) => ({ showExportDialog: !s.showExportDialog })),
   toggleEffectsBrowser: () => set((s) => ({ showEffectsBrowser: !s.showEffectsBrowser })),
   toggleHistoryPanel: () => set((s) => ({ showHistoryPanel: !s.showHistoryPanel })),
 }));

@@ -4,6 +4,7 @@ import { AuthPage } from '@/components/auth/AuthPage';
 import { CollabClient } from '@/components/collaboration/CollabClient';
 import { EditorLayout } from '@/components/layout/EditorLayout';
 import { EffectsBrowser } from '@/components/overlays/EffectsBrowser';
+import { ExportDialog } from '@/components/overlays/ExportDialog';
 import { HistoryPanel } from '@/components/overlays/HistoryPanel';
 import { ShortcutsOverlay } from '@/components/overlays/ShortcutsOverlay';
 import { ToastStack } from '@/components/overlays/ToastStack';
@@ -67,6 +68,7 @@ export default function App() {
       <HistoryPanel />
       <ShortcutsOverlay />
       <EffectsBrowser />
+      <ExportDialog />
       <ToastStack />
       {bootstrapError && (
         <div className="fixed bottom-3 left-3 z-50 max-w-md bg-amber-500/10 border border-amber-500/40 text-amber-300 text-xs rounded px-3 py-2">

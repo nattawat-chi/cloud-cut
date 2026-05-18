@@ -144,6 +144,7 @@ export function TopBar() {
         </button>
         <button
           type="button"
+          onClick={() => useUIStore.getState().toggleExportDialog()}
           className={cn(
             'inline-flex h-[30px] items-center gap-1.5 rounded-md bg-accent px-3',
             'text-xs font-semibold text-accent-foreground hover:brightness-105',

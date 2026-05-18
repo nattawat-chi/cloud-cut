@@ -158,4 +158,20 @@ file (it pulls React + Babel from a CDN at runtime).
 | 13 — `.env.example` | ✅ | [`.env.example`](.env.example) — all vars documented |
 | 14 — demo video / screenshots | ⏳ | Run locally and capture (see Quick start below) |
 
+### Definition of Done
+
+| # | Item | Status | Evidence |
+|---|---|:--:|---|
+| 1 | Frontend opens | ✅ | `pnpm dev` → http://localhost:5173 |
+| 2 | Login works | ✅ | `<AuthPage>` form → POST `/auth/login` → JWT in `authStore` (seed: `alice@cloudcut.dev` / `password123`) |
+| 3 | Project opens | ✅ | After login, App auto-fetches `/workspaces` → `/projects` → `/projects/:id/timeline` |
+| 4 | Timeline shows tracks + clips | ✅ | Hydrated from real DB; 4 tracks + clips render in the editor |
+| 5 | Drag/trim/split clip | ✅ | Works on local Zustand store (PATCH-to-backend persistence is a future enhancement) |
+| 6 | Upload asset → backend creates job | ✅ | Upload button → presign → MinIO PUT → PATCH status=processing → `XADD cloudcut:assets` |
+| 7 | Worker calls ffmpeg | ✅ | Verified: worker processes asset in ~1s, generates `proxy.mp4` + `thumbnail.jpg` + `waveform.json` |
+| 8 | Export video | ✅ | ExportDialog (TopBar → Export) → format + 4-res picker → POST `/exports` → worker composites + uploads `output.mp4` |
+| 9 | Pusher presence / operation sync | ✅ | Real `pusher-js` subscribes to `presence-project-<id>`; backend signs auth + publishes ops. Falls back to scripted `CollabSimulator` when keys missing |
+| 10 | Tests pass | ✅ | 59/59 Vitest + 3/3 cargo |
+| 11 | README + DESIGN.md complete | ✅ | This file + `backend/DESIGN.md` + `worker/DESIGN.md` + `frontend/DESIGN.md` + `docs/database-design.md` |
+
 **Real Pusher integration** (a separate spec requirement, not a numbered rule): backend signs presence/private channels via hand-rolled HMAC-SHA256 in [`backend/src/pusher/`](backend/src/pusher/) and publishes timeline ops to `presence-project-<id>`; frontend subscribes via [`pusher-js`](frontend/src/services/pusher.ts) and mirrors remote ops into `projectStore`. Falls back gracefully to the scripted `CollabSimulator` when Pusher env vars are missing.
