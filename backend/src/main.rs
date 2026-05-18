@@ -1,38 +1,57 @@
-//! CloudCut backend — Phase 0 placeholder.
-//!
-//! Real router, auth, and DB pool land in Phase 3. This binary only proves that
-//! `cargo run -p backend` succeeds (Rule 2) and that env wiring is reachable.
+mod app;
+mod auth;
+mod openapi;
+mod assets;
+mod collaboration;
+mod config;
+mod db;
+mod error;
+mod exports;
+mod models;
+mod projects;
+mod rate_limit;
+mod state;
+mod workspaces;
 
-use std::net::SocketAddr;
-
+use std::{net::SocketAddr, sync::Arc};
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // .env is optional — production reads real env vars directly.
     let _ = dotenvy::dotenv();
 
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "backend=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "backend=debug,tower_http=info".into()),
         )
         .init();
 
-    let host = std::env::var("BACKEND_HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port: u16 = std::env::var("BACKEND_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8080);
-    let addr: SocketAddr = format!("{host}:{port}").parse()?;
+    let config = config::Config::from_env()?;
 
-    info!("CloudCut backend — Phase 0 placeholder");
-    info!("Would bind to {addr} (Phase 3 will start the Axum router here).");
-    info!(
-        "DATABASE_URL set: {}",
-        std::env::var("DATABASE_URL").is_ok()
-    );
-    info!("REDIS_URL set:    {}", std::env::var("REDIS_URL").is_ok());
+    let pool = db::connect(&config.database_url).await?;
+    info!("connected to postgres");
+
+    let redis_client = redis::Client::open(config.redis_url.as_str())
+        .map_err(|e| anyhow::anyhow!("redis client: {e}"))?;
+    let redis_conn = redis::aio::ConnectionManager::new(redis_client)
+        .await
+        .map_err(|e| anyhow::anyhow!("redis connect: {e}"))?;
+    info!("connected to redis");
+
+    let state = state::AppState {
+        db:           pool,
+        config:       Arc::new(config.clone()),
+        rate_limiter: rate_limit::RateLimiter::new(redis_conn),
+    };
+
+    let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
+    let router = app::build(state);
+
+    info!("CloudCut backend listening on {addr}");
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, router).await?;
 
     Ok(())
 }
