@@ -84,6 +84,24 @@ export interface ProjectState {
   toggleEffect: (clipId: UUID, effectId: UUID) => void;
   updateEffect: (clipId: UUID, effectId: UUID, value: number) => void;
   removeEffect: (clipId: UUID, effectId: UUID) => void;
+
+  // ── Remote ops (from Pusher) ──────────────────────────────────────────────
+  // These mirror the user-facing mutations but DON'T call back to the API —
+  // the server already has the canonical state (that's how the event got
+  // here in the first place). Calling moveClip() / deleteClips() from a
+  // Pusher handler would PATCH back to the server, which would re-broadcast
+  // the same event, which would PATCH again, … = the infinite loop that
+  // hit ERR_INSUFFICIENT_RESOURCES on every drag.
+  applyRemoteClipUpsert: (clip: {
+    id: UUID;
+    track_id: UUID;
+    asset_id: UUID | null;
+    pos_ms: number;
+    dur_ms: number;
+    trim_in_ms?: number;
+    name: string;
+  }) => void;
+  applyRemoteClipDelete: (clipId: UUID) => void;
 }
 
 const EFFECT_DEFAULTS: Record<EffectType, number> = {
@@ -483,6 +501,44 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       return {
         ...pushSnapshot(s),
         effects: { ...s.effects, [clipId]: list.filter((fx) => fx.id !== effectId) },
+      };
+    }),
+
+  // ── Remote ops (no API roundtrip) ─────────────────────────────────────────
+
+  applyRemoteClipUpsert: (clip) =>
+    set((s) => {
+      const existingIdx = s.clips.findIndex((c) => c.id === clip.id);
+      const next: Clip = {
+        id: clip.id,
+        trackId: clip.track_id,
+        assetId: clip.asset_id ?? '',
+        name: clip.name,
+        posMs: Math.max(0, clip.pos_ms),
+        durMs: Math.max(400, clip.dur_ms),
+        inPointMs: clip.trim_in_ms ?? 0,
+        outPointMs: (clip.trim_in_ms ?? 0) + clip.dur_ms,
+        transform: existingIdx >= 0
+          ? s.clips[existingIdx]!.transform
+          : { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+        thumbs: existingIdx >= 0 ? s.clips[existingIdx]!.thumbs : undefined,
+        version: existingIdx >= 0 ? s.clips[existingIdx]!.version + 1 : 1,
+      };
+      const clips =
+        existingIdx === -1
+          ? [...s.clips, next]
+          : s.clips.map((c, i) => (i === existingIdx ? next : c));
+      return { clips };
+    }),
+
+  applyRemoteClipDelete: (clipId) =>
+    set((s) => {
+      if (!s.clips.some((c) => c.id === clipId)) return {};
+      const nextEffects = { ...s.effects };
+      delete nextEffects[clipId];
+      return {
+        clips: s.clips.filter((c) => c.id !== clipId),
+        effects: nextEffects,
       };
     }),
 }));

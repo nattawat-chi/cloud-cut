@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { Channel } from 'pusher-js';
 
 import { getPusher, isPusherEnabled } from '@/services/pusher';
+import { useAuthStore } from '@/state/authStore';
 import { useCollabStore } from '@/state/collabStore';
 import { useHistoryStore } from '@/state/historyStore';
 import { useProjectStore } from '@/state/projectStore';
@@ -26,8 +27,10 @@ interface ClipUpdatedPayload {
   readonly clip: {
     readonly id: string;
     readonly track_id: string;
+    readonly asset_id: string | null;
     readonly pos_ms: number;
     readonly dur_ms: number;
+    readonly trim_in_ms?: number;
     readonly name: string;
   };
 }
@@ -48,9 +51,12 @@ function useRealtime(): void {
   const setCollaborators = useCollabStore((s) => s.setCollaborators);
   const addCollaborator = useCollabStore((s) => s.addCollaborator);
   const removeCollaborator = useCollabStore((s) => s.removeCollaborator);
-  const moveClipLocal = useProjectStore((s) => s.moveClip);
-  const resizeClipLocal = useProjectStore((s) => s.resizeClip);
-  const deleteClipsLocal = useProjectStore((s) => s.deleteClips);
+  // Remote-op actions skip the API roundtrip — see projectStore.applyRemote*.
+  // Wiring the user-facing moveClip / resizeClip / deleteClips here would
+  // immediately re-PATCH the server, which re-publishes the same Pusher
+  // event, which lands back here = ERR_INSUFFICIENT_RESOURCES infinite loop.
+  const applyRemoteClipUpsert = useProjectStore((s) => s.applyRemoteClipUpsert);
+  const applyRemoteClipDelete = useProjectStore((s) => s.applyRemoteClipDelete);
   const toast = useHistoryStore((s) => s.toast);
 
   useEffect(() => {
@@ -122,18 +128,26 @@ function useRealtime(): void {
     });
 
     // ── Op events (apply remote edits) ────────────────────────────────────────
+    // Pull the real user id off the auth store at event time. We were
+    // previously comparing payload.actor to a static VITE_USER_ID env var
+    // which was always empty - so every echo of our own action got applied
+    // back, triggering another PATCH, triggering another event, and so on.
+    const isOwnAction = (actor: string) =>
+      actor === useAuthStore.getState().user?.id;
+
+    channel.bind('clip:added', (payload: ClipUpdatedPayload) => {
+      if (isOwnAction(payload.actor)) return;
+      applyRemoteClipUpsert(payload.clip);
+    });
+
     channel.bind('clip:updated', (payload: ClipUpdatedPayload) => {
-      // Skip our own ops — local store is already authoritative
-      const myId = (import.meta.env.VITE_USER_ID as string | undefined) ?? '';
-      if (payload.actor === myId) return;
-      moveClipLocal(payload.clip.id, payload.clip.pos_ms, payload.clip.track_id);
-      resizeClipLocal(payload.clip.id, payload.clip.pos_ms, payload.clip.dur_ms);
+      if (isOwnAction(payload.actor)) return;
+      applyRemoteClipUpsert(payload.clip);
     });
 
     channel.bind('clip:deleted', (payload: ClipDeletedPayload) => {
-      const myId = (import.meta.env.VITE_USER_ID as string | undefined) ?? '';
-      if (payload.actor === myId) return;
-      deleteClipsLocal([payload.clip_id]);
+      if (isOwnAction(payload.actor)) return;
+      applyRemoteClipDelete(payload.clip_id);
     });
 
     return () => {
@@ -146,9 +160,8 @@ function useRealtime(): void {
     setCollaborators,
     addCollaborator,
     removeCollaborator,
-    moveClipLocal,
-    resizeClipLocal,
-    deleteClipsLocal,
+    applyRemoteClipUpsert,
+    applyRemoteClipDelete,
     toast,
   ]);
 }
