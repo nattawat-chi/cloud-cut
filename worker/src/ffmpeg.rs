@@ -1,7 +1,9 @@
+use std::future::Future;
 use std::path::Path;
 use std::process::Stdio;
 
 use serde::Deserialize;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use crate::error::WorkerError;
@@ -80,23 +82,45 @@ pub async fn probe(path: &Path) -> Result<ProbeResult, WorkerError> {
 // ─── Proxy ────────────────────────────────────────────────────────────────────
 
 /// Transcode to 720p H.264/AAC MP4 proxy for fast timeline preview.
-pub async fn make_proxy(input: &Path, output: &Path) -> Result<(), WorkerError> {
-    run_ffmpeg(&[
-        "-y",
-        "-i", input.to_str().unwrap(),
-        // Video: scale to 720p max, keep aspect, libx264 fast preset
-        "-vf", "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-movflags", "+faststart",
-        // Audio: stereo AAC 128k
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-ac", "2",
-        output.to_str().unwrap(),
-    ])
-    .await
+/// `on_progress` is called with a 0..=100 integer roughly every 500ms while
+/// ffmpeg streams `-progress` updates. Pass a no-op closure when not needed.
+pub async fn make_proxy<F, Fut>(
+    input: &Path,
+    output: &Path,
+    duration_ms: Option<i64>,
+    on_progress: F,
+) -> Result<(), WorkerError>
+where
+    F: Fn(i16) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send,
+{
+    let args = vec![
+        "-y".to_owned(),
+        "-i".to_owned(),
+        input.to_string_lossy().into_owned(),
+        "-vf".to_owned(),
+        "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease".to_owned(),
+        "-c:v".to_owned(),
+        "libx264".to_owned(),
+        "-preset".to_owned(),
+        "fast".to_owned(),
+        "-crf".to_owned(),
+        "23".to_owned(),
+        "-movflags".to_owned(),
+        "+faststart".to_owned(),
+        "-c:a".to_owned(),
+        "aac".to_owned(),
+        "-b:a".to_owned(),
+        "128k".to_owned(),
+        "-ac".to_owned(),
+        "2".to_owned(),
+        // Progress stream → stdout, machine-parseable key=value
+        "-progress".to_owned(),
+        "pipe:1".to_owned(),
+        "-nostats".to_owned(),
+        output.to_string_lossy().into_owned(),
+    ];
+    run_ffmpeg_with_progress(&args, duration_ms, on_progress).await
 }
 
 // ─── Thumbnail ────────────────────────────────────────────────────────────────
@@ -299,6 +323,81 @@ async fn run_ffmpeg(args: &[&str]) -> Result<(), WorkerError> {
         let tail: String = stderr.chars().rev().take(500).collect::<String>()
             .chars().rev().collect();
         return Err(WorkerError::Ffmpeg(format!("exit {:?}: …{tail}", output.status.code())));
+    }
+
+    Ok(())
+}
+
+/// Run ffmpeg with `-progress pipe:1` parsing. Streams stdout line-by-line,
+/// extracts `out_time_us=N` values, computes a 0–100 percent against
+/// `duration_ms`, and invokes `on_progress` after each "block" (ffmpeg emits
+/// one block ~every 500ms ending with `progress=continue` or `progress=end`).
+async fn run_ffmpeg_with_progress<F, Fut>(
+    args: &[String],
+    duration_ms: Option<i64>,
+    on_progress: F,
+) -> Result<(), WorkerError>
+where
+    F: Fn(i16) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send,
+{
+    tracing::debug!(args = ?args, "running ffmpeg (progress)");
+
+    let mut child = Command::new("ffmpeg")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| WorkerError::Ffmpeg(format!("ffmpeg spawn: {e}")))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| WorkerError::Ffmpeg("missing stdout pipe".into()))?;
+    let total_us = duration_ms.map(|d| d * 1000).unwrap_or(0);
+
+    // Parse progress lines until EOF
+    let mut reader = BufReader::new(stdout).lines();
+    let mut last_emit: i16 = 0;
+    while let Some(line) = reader
+        .next_line()
+        .await
+        .map_err(|e| WorkerError::Ffmpeg(format!("read progress: {e}")))?
+    {
+        // ffmpeg progress format: `key=value`. We only care about `out_time_us`
+        // and the `progress=` sentinel that terminates each block.
+        if let Some(value) = line.strip_prefix("out_time_us=") {
+            if total_us > 0 {
+                if let Ok(out_us) = value.trim().parse::<i64>() {
+                    let pct = ((out_us as f64 / total_us as f64) * 100.0)
+                        .clamp(0.0, 99.0) as i16;
+                    if pct > last_emit {
+                        last_emit = pct;
+                        on_progress(pct).await;
+                    }
+                }
+            }
+        } else if line.starts_with("progress=end") {
+            on_progress(100).await;
+        }
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| WorkerError::Ffmpeg(format!("ffmpeg wait: {e}")))?;
+    if !status.success() {
+        // Drain stderr for diagnostics
+        let mut stderr_buf = String::new();
+        if let Some(mut s) = child.stderr.take() {
+            let _ = tokio::io::AsyncReadExt::read_to_string(&mut s, &mut stderr_buf).await;
+        }
+        let tail: String = stderr_buf.chars().rev().take(500).collect::<String>()
+            .chars().rev().collect();
+        return Err(WorkerError::Ffmpeg(format!(
+            "exit {:?}: …{tail}",
+            status.code()
+        )));
     }
 
     Ok(())

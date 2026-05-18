@@ -15,6 +15,8 @@ pub struct AssetRow {
     pub height: Option<i32>,
     pub original_key: String,
     pub status: String,
+    /// 0–100 — updated by the worker from ffmpeg's `-progress pipe:1` stream.
+    pub progress_pct: i16,
     pub uploaded_by: Uuid,
     pub created_at: DateTime<Utc>,
 }

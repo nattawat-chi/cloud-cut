@@ -102,9 +102,28 @@ async fn process_video(
 ) -> Result<(), WorkerError> {
     let asset_id = asset_id_str.parse::<Uuid>().unwrap();
 
-    // Proxy
+    // Proxy — pass a progress callback that UPDATEs assets.progress_pct.
+    // Proxy generation dominates the pipeline time, so we map proxy progress
+    // (0–99) directly to the asset's overall progress. The final 100% is set
+    // at the end of process_asset::run when status flips to "ready".
     let proxy_path = tmp.join("proxy.mp4");
-    ffmpeg::make_proxy(original, &proxy_path).await?;
+    let db_clone = db.clone();
+    ffmpeg::make_proxy(
+        original,
+        &proxy_path,
+        probe.duration_ms,
+        move |pct| {
+            let db = db_clone.clone();
+            async move {
+                let _ = sqlx::query("UPDATE assets SET progress_pct = $1 WHERE id = $2")
+                    .bind(pct)
+                    .bind(asset_id)
+                    .execute(&db)
+                    .await;
+            }
+        },
+    )
+    .await?;
     let proxy_key = format!("variants/{asset_id_str}/proxy.mp4");
     s3::upload_file(s3_client, &config.s3_bucket, &proxy_key, &proxy_path, "video/mp4").await?;
     upsert_variant(db, asset_id, "proxy", &proxy_key, "video/mp4", &proxy_path).await?;

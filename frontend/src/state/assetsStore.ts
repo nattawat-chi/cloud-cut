@@ -94,6 +94,20 @@ export function selectHasProcessing(s: AssetsState): boolean {
 /** Map an `AssetResponse` from the backend into the frontend's `Asset` shape. */
 export function toAsset(r: AssetResponse): Asset {
   const type: AssetType = r.kind === 'font' ? 'image' : (r.kind as AssetType);
+  const base = `${import.meta.env.VITE_S3_PUBLIC_URL ?? '/s3/cloudcut-assets'}/variants/${r.id}`;
+  const ready = r.status === 'ready';
+
+  // Real progress comes from the backend `progress_pct` column the worker
+  // updates from ffmpeg's `-progress` output. Fall back to 0 if absent
+  // (older backend builds / asset uploaded before worker was running).
+  const backendProgress = (r as AssetResponse & { progress_pct?: number }).progress_pct;
+  const progress =
+    typeof backendProgress === 'number'
+      ? backendProgress
+      : ready
+        ? 100
+        : 0;
+
   return {
     id: r.id,
     type,
@@ -101,12 +115,11 @@ export function toAsset(r: AssetResponse): Asset {
     durMs: r.duration_ms,
     size: formatBytes(r.size_bytes),
     status: r.status as AssetStatus,
-    progress: r.status === 'ready' ? 100 : r.status === 'processing' ? 50 : 0,
-    // S3 public URL convention — see docker/minio/setup.sh anonymous rule on /variants/*
-    thumb:
-      r.status === 'ready'
-        ? `${import.meta.env.VITE_S3_PUBLIC_URL ?? '/s3/cloudcut-assets'}/variants/${r.id}/thumbnail.jpg`
-        : undefined,
+    progress,
+    thumb: ready ? `${base}/thumbnail.jpg` : undefined,
+    // Worker generates proxy.mp4 only for video assets — see
+    // worker/src/jobs/process_asset.rs::process_video.
+    proxyUrl: ready && type === 'video' ? `${base}/proxy.mp4` : undefined,
   };
 }
 

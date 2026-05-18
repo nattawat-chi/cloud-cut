@@ -1,4 +1,3 @@
-import type React from 'react';
 import { useEffect } from 'react';
 import type { Channel } from 'pusher-js';
 
@@ -7,7 +6,6 @@ import { useCollabStore } from '@/state/collabStore';
 import { useHistoryStore } from '@/state/historyStore';
 import { useProjectStore } from '@/state/projectStore';
 import { useUIStore } from '@/state/uiStore';
-import { CollabSimulator } from './CollabSimulator';
 
 /* =============================================================================
    CollabClient
@@ -15,7 +13,7 @@ import { CollabSimulator } from './CollabSimulator';
      1. Subscribe to `presence-project-<id>` for the current project
      2. Mirror presence member set into collabStore
      3. Apply incoming op events to the local project store, skipping own ops
-   Falls back to CollabSimulator when Pusher isn't configured (dev mode).
+   No-op when Pusher env vars are missing (real-time disabled, single-user mode).
    ============================================================================= */
 
 interface PresenceMember {
@@ -39,18 +37,17 @@ interface ClipDeletedPayload {
   readonly clip_id: string;
 }
 
-export function CollabClient(): React.ReactElement | null {
-  // useRealtime is always called so hook order is stable; it no-ops without Pusher.
+export function CollabClient(): null {
   useRealtime();
-
-  // Fall back to the scripted simulator for dev environments without Pusher creds.
-  return isPusherEnabled() ? null : <CollabSimulator />;
+  return null;
 }
 
 function useRealtime(): void {
   const projectId = useProjectStore((s) => s.project?.id ?? null);
   const showPresence = useUIStore((s) => s.showPresence);
-  const setAllVisible = useCollabStore((s) => s.setAllVisible);
+  const setCollaborators = useCollabStore((s) => s.setCollaborators);
+  const addCollaborator = useCollabStore((s) => s.addCollaborator);
+  const removeCollaborator = useCollabStore((s) => s.removeCollaborator);
   const moveClipLocal = useProjectStore((s) => s.moveClip);
   const resizeClipLocal = useProjectStore((s) => s.resizeClip);
   const deleteClipsLocal = useProjectStore((s) => s.deleteClips);
@@ -59,10 +56,7 @@ function useRealtime(): void {
   useEffect(() => {
     if (!isPusherEnabled()) return;
     if (!projectId) return;
-    if (!showPresence) {
-      setAllVisible(false);
-      return;
-    }
+    if (!showPresence) return;
 
     const pusher = getPusher();
     if (!pusher) return;
@@ -70,20 +64,42 @@ function useRealtime(): void {
     const channelName = `presence-project-${projectId}`;
     const channel: Channel = pusher.subscribe(channelName);
 
+    // Helper: map Pusher member shape → our Collaborator type
+    const mapMember = (m: PresenceMember) => {
+      const name = m.info?.name ?? 'Anonymous';
+      const initials = name
+        .split(/\s+/)
+        .map((p) => p[0])
+        .filter(Boolean)
+        .slice(0, 2)
+        .join('')
+        .toUpperCase();
+      return {
+        id: m.id,
+        name,
+        initials,
+        color: pickColor(m.id),
+      };
+    };
+
     // ── Presence ──────────────────────────────────────────────────────────────
-    channel.bind('pusher:subscription_succeeded', (members: { each: (cb: (m: PresenceMember) => void) => void }) => {
-      const seen: string[] = [];
-      members.each((m) => seen.push(m.info?.name ?? m.id));
-      // Lightweight feedback that we're connected
-      toast({ who: 'CloudCut', body: `Connected — ${seen.length} editor(s) online` });
+    channel.bind('pusher:subscription_succeeded', (members: {
+      each: (cb: (m: PresenceMember) => void) => void;
+    }) => {
+      const list: ReturnType<typeof mapMember>[] = [];
+      members.each((m) => list.push(mapMember(m)));
+      setCollaborators(list);
+      toast({ who: 'CloudCut', body: `Connected — ${list.length} editor(s) online` });
     });
 
-    channel.bind('pusher:member_added', (member: PresenceMember) => {
-      toast({ who: 'CloudCut', body: `${member.info?.name ?? 'Someone'} joined` });
+    channel.bind('pusher:member_added', (m: PresenceMember) => {
+      addCollaborator(mapMember(m));
+      toast({ who: 'CloudCut', body: `${m.info?.name ?? 'Someone'} joined` });
     });
 
-    channel.bind('pusher:member_removed', (member: PresenceMember) => {
-      toast({ who: 'CloudCut', body: `${member.info?.name ?? 'Someone'} left` });
+    channel.bind('pusher:member_removed', (m: PresenceMember) => {
+      removeCollaborator(m.id);
+      toast({ who: 'CloudCut', body: `${m.info?.name ?? 'Someone'} left` });
     });
 
     // ── Op events (apply remote edits) ────────────────────────────────────────
@@ -91,7 +107,6 @@ function useRealtime(): void {
       // Skip our own ops — local store is already authoritative
       const myId = (import.meta.env.VITE_USER_ID as string | undefined) ?? '';
       if (payload.actor === myId) return;
-      // Apply move + resize from server-canonical values
       moveClipLocal(payload.clip.id, payload.clip.pos_ms, payload.clip.track_id);
       resizeClipLocal(payload.clip.id, payload.clip.pos_ms, payload.clip.dur_ms);
     });
@@ -104,14 +119,26 @@ function useRealtime(): void {
 
     return () => {
       pusher.unsubscribe(channelName);
+      setCollaborators([]);
     };
   }, [
     projectId,
     showPresence,
-    setAllVisible,
+    setCollaborators,
+    addCollaborator,
+    removeCollaborator,
     moveClipLocal,
     resizeClipLocal,
     deleteClipsLocal,
     toast,
   ]);
+}
+
+// Stable per-user colour from a short hash so the same person always gets
+// the same avatar tint across sessions.
+function pickColor(id: string): string {
+  const palette = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7', '#ec4899'];
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) & 0xffffffff;
+  return palette[Math.abs(h) % palette.length]!;
 }
