@@ -1,9 +1,10 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 
-#[derive(Debug, sqlx::FromRow, Serialize)]
+#[derive(Debug, sqlx::FromRow, Serialize, ToSchema)]
 pub struct ExportJobRow {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -19,7 +20,7 @@ pub struct ExportJobRow {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct CreateExportReq {
     /// "mp4" | "webm" | "mov"
     pub format: Option<String>,
@@ -27,7 +28,7 @@ pub struct CreateExportReq {
     pub resolution: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ExportJobCreated {
     pub job: ExportJobRow,
     /// Redis stream ID that the worker will pick up.

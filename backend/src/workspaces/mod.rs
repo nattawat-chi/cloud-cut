@@ -1,20 +1,35 @@
+pub mod authz;
+
 use axum::{extract::State, routing::get, Json, Router};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{auth::extractor::AuthUser, error::AppError, state::AppState};
 
-#[derive(Debug, sqlx::FromRow, Serialize)]
+#[derive(Debug, sqlx::FromRow, Serialize, ToSchema)]
 pub struct WorkspaceRow {
     pub id: Uuid,
     pub name: String,
+    /// "free" | "pro" | "team"
     pub plan: String,
+    /// "owner" | "admin" | "editor" | "viewer"
     pub role: String,
     pub created_at: DateTime<Utc>,
 }
 
 /// GET /api/v1/workspaces — every workspace the caller belongs to.
+#[utoipa::path(
+    get,
+    path = "/api/v1/workspaces",
+    responses(
+        (status = 200, description = "Workspaces the caller is a member of", body = Vec<WorkspaceRow>),
+        (status = 401, description = "Missing or invalid Bearer token"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "workspaces",
+)]
 pub async fn list_workspaces(
     State(state): State<AppState>,
     auth: AuthUser,
