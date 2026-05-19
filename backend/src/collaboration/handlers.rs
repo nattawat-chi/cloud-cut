@@ -25,6 +25,21 @@ use crate::{
 
 const MAX_OPS_PER_PAGE: i64 = 500;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/projects/{id}/operations",
+    params(
+        ("id" = Uuid, Path, description = "Project UUID"),
+        OperationsQuery,
+    ),
+    responses(
+        (status = 200, description = "Operations with seq > afterSeq, ordered ASC", body = OperationsResponse),
+        (status = 403, description = "Not a workspace member"),
+        (status = 404, description = "Project not found or archived"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "collaboration",
+)]
 pub async fn list_operations(
     State(state): State<AppState>,
     auth: AuthUser,

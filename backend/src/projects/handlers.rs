@@ -18,6 +18,20 @@ use crate::{
 
 // ─── GET /api/v1/workspaces/:workspace_id/projects ───────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/workspaces/{workspace_id}/projects",
+    params(
+        ("workspace_id" = Uuid, Path, description = "Workspace UUID"),
+        ListQuery,
+    ),
+    responses(
+        (status = 200, description = "Paginated projects", body = PagedProjects),
+        (status = 403, description = "Not a workspace member"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn list_projects(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -53,6 +67,18 @@ pub async fn list_projects(
 
 // ─── POST /api/v1/workspaces/:workspace_id/projects ──────────────────────────
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/workspaces/{workspace_id}/projects",
+    params(("workspace_id" = Uuid, Path, description = "Workspace UUID")),
+    request_body = CreateProjectReq,
+    responses(
+        (status = 201, description = "Project created", body = ProjectRow),
+        (status = 403, description = "Insufficient role — editor+ required"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn create_project(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -85,6 +111,17 @@ pub async fn create_project(
 
 // ─── GET /api/v1/projects/:id ─────────────────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/projects/{id}",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    responses(
+        (status = 200, description = "Project detail", body = ProjectRow),
+        (status = 404, description = "Project not found or archived"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn get_project(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -97,6 +134,18 @@ pub async fn get_project(
 
 // ─── PATCH /api/v1/projects/:id ───────────────────────────────────────────────
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/projects/{id}",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    request_body = UpdateProjectReq,
+    responses(
+        (status = 200, description = "Updated project", body = ProjectRow),
+        (status = 403, description = "Insufficient role — editor+ required"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn update_project(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -132,6 +181,17 @@ pub async fn update_project(
 
 // ─── DELETE /api/v1/projects/:id (archive) ────────────────────────────────────
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/projects/{id}",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    responses(
+        (status = 204, description = "Project archived"),
+        (status = 403, description = "Insufficient role — admin+ required"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn archive_project(
     State(state): State<AppState>,
     auth: AuthUser,

@@ -20,6 +20,19 @@ const EXPORT_STREAM: &str = "cloudcut:exports";
 
 // ─── POST /api/v1/projects/:id/exports ────────────────────────────────────────
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/projects/{id}/exports",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    request_body = CreateExportReq,
+    responses(
+        (status = 202, description = "Export job enqueued", body = ExportJobCreated),
+        (status = 403, description = "Insufficient role — editor+ required"),
+        (status = 429, description = "Concurrent export limit reached for this workspace plan"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "exports",
+)]
 pub async fn create_export(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -81,6 +94,17 @@ pub async fn create_export(
 
 // ─── GET /api/v1/exports/:id ──────────────────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/exports/{id}",
+    params(("id" = Uuid, Path, description = "Export job UUID")),
+    responses(
+        (status = 200, description = "Export job status", body = ExportJobRow),
+        (status = 404, description = "Export job not found"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "exports",
+)]
 pub async fn get_export(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -102,6 +126,16 @@ pub async fn get_export(
 
 // ─── GET /api/v1/projects/:id/exports ─────────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/projects/{id}/exports",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    responses(
+        (status = 200, description = "Export jobs for this project (last 50)", body = Vec<ExportJobRow>),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "exports",
+)]
 pub async fn list_exports(
     State(state): State<AppState>,
     auth: AuthUser,

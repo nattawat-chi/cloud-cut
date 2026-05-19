@@ -24,6 +24,17 @@ use crate::{
 
 // ─── POST /api/v1/auth/register ───────────────────────────────────────────────
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/register",
+    request_body = RegisterRequest,
+    responses(
+        (status = 201, description = "User created", body = TokenPairResponse),
+        (status = 409, description = "Email already registered"),
+        (status = 400, description = "Validation error"),
+    ),
+    tag = "auth",
+)]
 pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
@@ -73,6 +84,16 @@ pub async fn register(
 
 // ─── POST /api/v1/auth/login ──────────────────────────────────────────────────
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/login",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = TokenPairResponse),
+        (status = 401, description = "Invalid credentials"),
+    ),
+    tag = "auth",
+)]
 pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
@@ -106,6 +127,16 @@ pub async fn login(
 
 // ─── POST /api/v1/auth/refresh ────────────────────────────────────────────────
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/refresh",
+    request_body = RefreshRequest,
+    responses(
+        (status = 200, description = "New access token", body = AccessTokenResponse),
+        (status = 401, description = "Refresh token invalid, revoked, or expired"),
+    ),
+    tag = "auth",
+)]
 pub async fn refresh(
     State(state): State<AppState>,
     Json(req): Json<RefreshRequest>,
@@ -163,6 +194,16 @@ pub async fn logout(
 
 // ─── GET /api/v1/auth/me ──────────────────────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/me",
+    responses(
+        (status = 200, description = "Current authenticated user"),
+        (status = 401, description = "Missing or invalid Bearer token"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth",
+)]
 pub async fn me(
     State(state): State<AppState>,
     auth: AuthUser,

@@ -9,6 +9,7 @@ mod collaboration;
 mod config;
 mod error;
 mod exports;
+mod openapi;
 mod projects;
 mod pusher;
 mod rate_limit;
@@ -30,8 +31,11 @@ use tower_http::{
     trace::TraceLayer,
 };
 use tracing::info;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 use config::Config;
+use openapi::ApiDoc;
 use state::AppState;
 
 #[tokio::main]
@@ -86,6 +90,11 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api/v1", api)
+        // Swagger UI at /api/v1/docs — raw spec at /api/v1/openapi.json
+        .merge(
+            SwaggerUi::new("/api/v1/docs")
+                .url("/api/v1/openapi.json", ApiDoc::openapi()),
+        )
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state)

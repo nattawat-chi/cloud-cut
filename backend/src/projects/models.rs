@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 use validator::Validate;
 
 // ─── DB row ───────────────────────────────────────────────────────────────────
 
-#[derive(Debug, sqlx::FromRow, Serialize)]
+#[derive(Debug, sqlx::FromRow, Serialize, ToSchema)]
 pub struct ProjectRow {
     pub id: Uuid,
     pub workspace_id: Uuid,
@@ -24,7 +25,7 @@ pub struct ProjectRow {
 
 // ─── Request DTOs ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct CreateProjectReq {
     #[validate(length(min = 1, max = 255))]
     pub name: String,
@@ -34,7 +35,7 @@ pub struct CreateProjectReq {
     pub resolution_h: Option<i32>,
 }
 
-#[derive(Debug, Deserialize, Validate)]
+#[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct UpdateProjectReq {
     #[validate(length(min = 1, max = 255))]
     pub name: Option<String>,
@@ -45,14 +46,14 @@ pub struct UpdateProjectReq {
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct ListQuery {
     /// Opaque cursor from previous page's `next_cursor` field.
     pub cursor: Option<String>,
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PagedProjects {
     pub items: Vec<ProjectRow>,
     pub next_cursor: Option<String>,
