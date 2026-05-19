@@ -7,8 +7,8 @@ use crate::{
     config::Config,
     error::WorkerError,
     ffmpeg,
-    jobs::{get_field, JobFields},
-    s3,
+    processor::{get_field, JobFields},
+    storage,
 };
 
 #[derive(Debug, sqlx::FromRow)]
@@ -17,10 +17,7 @@ struct ClipRow {
     dur_ms: i64,
     trim_in_ms: i64,
     speed: f64,
-    /// Path to the original asset in S3 — preferred for export so we don't
-    /// upscale the 720p proxy and lose detail.
     original_key: Option<String>,
-    /// Proxy path — fallback only if the original is somehow missing.
     proxy_key: Option<String>,
 }
 
@@ -58,7 +55,6 @@ pub async fn run(
     let (fps, _proj_w, _proj_h) =
         project.ok_or_else(|| WorkerError::Other(format!("project {project_id} not found")))?;
 
-    // Override resolution if requested
     let (width, height) = match resolution.as_str() {
         "360" => (640u32, 360u32),
         "720" => (1280u32, 720u32),
@@ -67,9 +63,6 @@ pub async fn run(
     };
 
     // ── Load clips ordered by track position + pos_ms ───────────────────────
-    // Fetch BOTH the original_key (preferred for export) and the proxy_key
-    // (fallback). Using original means we feed ffmpeg the full-resolution
-    // source so a 4K output isn't an upscale of a 720p proxy.
     let clips: Vec<ClipRow> = sqlx::query_as::<_, ClipRow>(
         r#"
         SELECT c.pos_ms, c.dur_ms, c.trim_in_ms, c.speed::float8 AS speed,
@@ -94,12 +87,11 @@ pub async fn run(
         return Ok(());
     }
 
-    // ── Download proxy files to temp dir ────────────────────────────────────
+    // ── Download source files to temp dir ───────────────────────────────────
     let tmp = tempfile::TempDir::new()?;
     let mut paths_and_meta: Vec<(std::path::PathBuf, i64, i64, i64, f64)> = Vec::new();
 
     for (i, clip) in clips.iter().enumerate() {
-        // Prefer the original (full quality) over the proxy (720p preview).
         let s3_key = clip
             .original_key
             .as_deref()
@@ -110,7 +102,7 @@ pub async fn run(
         };
         let ext = key.rsplit('.').next().unwrap_or("mp4");
         let local = tmp.path().join(format!("clip_{i}.{ext}"));
-        s3::download_file(s3_client, &config.s3_bucket, key, &local).await?;
+        storage::download_file(s3_client, &config.s3_bucket, key, &local).await?;
         paths_and_meta.push((local, clip.pos_ms, clip.dur_ms, clip.trim_in_ms, clip.speed));
     }
 
@@ -160,7 +152,7 @@ pub async fn run(
         _ => "video/mp4",
     };
     let output_key = format!("exports/{project_id}/{job_id}/output.{ext}");
-    s3::upload_file(s3_client, &config.s3_bucket, &output_key, &output_path, content_type).await?;
+    storage::upload_file(s3_client, &config.s3_bucket, &output_key, &output_path, content_type).await?;
 
     // ── Mark job done ───────────────────────────────────────────────────────
     sqlx::query(

@@ -50,8 +50,7 @@ impl PusherClient {
 
     // ─── Channel auth (called by POST /pusher/auth) ───────────────────────────
 
-    /// Sign a presence-channel subscription. `user_data` is a JSON object the
-    /// client will receive as part of the member info.
+    /// Sign a presence-channel subscription.
     pub fn sign_presence(
         &self,
         socket_id: &str,
@@ -109,7 +108,6 @@ impl PusherClient {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // Query params must be sorted alphabetically for the signature to match.
         let query = format!(
             "auth_key={}&auth_timestamp={}&auth_version=1.0&body_md5={}",
             self.key, auth_timestamp, body_md5
@@ -117,12 +115,16 @@ impl PusherClient {
         let string_to_sign = format!("POST\n{path}\n{query}");
         let signature = self.hmac_hex(&string_to_sign);
 
-        let url = format!(
-            "https://api-{}.pusher.com{path}?{query}&auth_signature={signature}",
-            self.cluster
-        );
+        let base_url = format!("https://api-{}.pusher.com{path}", self.cluster);
+        let url = format!("{base_url}?{query}&auth_signature={signature}");
 
-        tracing::debug!(url = %url, body_len = body.len(), "pusher trigger");
+        // Log only non-sensitive metadata — never log the signed URL or signature.
+        tracing::debug!(
+            channel,
+            event,
+            body_len = body.len(),
+            "pusher trigger"
+        );
 
         let resp = self
             .http
@@ -133,19 +135,21 @@ impl PusherClient {
             .await
             .map_err(|e| AppError::internal(format!("pusher http: {e}")))?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
+        let status = resp.status();
+        if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            // Surface the exact body that failed signing so we can reproduce
-            // it offline with curl + the right secret.
+            // Do NOT log `body` here — it contains the full event payload.
             tracing::warn!(
-                status = %status,
-                body = %body,
+                channel,
+                event,
+                %status,
                 response = %text,
                 "pusher REST rejected request"
             );
             return Err(AppError::internal(format!("pusher {status}: {text}")));
         }
+
+        tracing::debug!(channel, event, "pusher trigger ok");
         Ok(())
     }
 

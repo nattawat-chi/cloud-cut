@@ -14,7 +14,7 @@ import { Playhead } from './Playhead';
 import { TimelineClip } from './TimelineClip';
 import { TimelineRuler } from './TimelineRuler';
 import { TimelineToolbar } from './TimelineToolbar';
-import { TrackHeader } from './TrackHeader';
+import { TimelineTrack } from './TimelineTrack';
 
 const SNAP_THRESHOLD_PX = 14;
 
@@ -33,6 +33,7 @@ export function Timeline() {
   const resizeClip = useProjectStore((s) => s.resizeClip);
   const splitClipAt = useProjectStore((s) => s.splitClipAt);
   const addClip = useProjectStore((s) => s.addClip);
+  const snapshotNow = useProjectStore((s) => s.snapshotNow);
 
   const trackPreset = useUIStore((s) => s.trackPreset);
   const selectedIds = useUIStore((s) => s.selectedClipIds);
@@ -107,6 +108,9 @@ export function Timeline() {
         return;
       }
 
+      // Capture pre-drag state once so the whole drag is one undo step.
+      snapshotNow();
+
       const startX = e.clientX;
       const startPos = clip.posMs;
       let moved = false;
@@ -143,7 +147,7 @@ export function Timeline() {
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [activeTool, clips, moveClip, pms, pushHistory, seek, selectClip, snapEnabled, splitClipAt, zoomLevel],
+    [activeTool, clips, moveClip, pms, pushHistory, seek, selectClip, snapEnabled, snapshotNow, splitClipAt, zoomLevel],
   );
 
   // ── Drag: trim handles ─────────────────────────────────────────────────
@@ -152,6 +156,8 @@ export function Timeline() {
       (e: React.MouseEvent, clip: Clip) => {
         e.preventDefault();
         selectClip(clip.id);
+        // Capture pre-trim state once so the whole trim drag is one undo step.
+        snapshotNow();
         const startX = e.clientX;
         const startPos = clip.posMs;
         const startDur = clip.durMs;
@@ -182,7 +188,7 @@ export function Timeline() {
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
       },
-    [pms, pushHistory, resizeClip, selectClip],
+    [pms, pushHistory, resizeClip, selectClip, snapshotNow],
   );
 
   const onTrimLeftMouseDown = useMemo(() => makeTrimHandler('left'), [makeTrimHandler]);
@@ -239,7 +245,7 @@ export function Timeline() {
           />
           <div className="flex-1 overflow-hidden">
             {visibleTracks.map((tr) => (
-              <TrackHeader key={tr.id} track={tr} />
+              <TimelineTrack key={tr.id} track={tr} />
             ))}
           </div>
         </div>

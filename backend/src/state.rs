@@ -5,7 +5,7 @@ use aws_sdk_s3::config::{BehaviorVersion, Region};
 use sqlx::PgPool;
 
 use crate::config::Config;
-use crate::pusher::client::PusherClient;
+use crate::collaboration::pusher::PusherClient;
 
 /// Shared application state injected into every Axum handler via `State<AppState>`.
 #[derive(Clone)]

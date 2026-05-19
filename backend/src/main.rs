@@ -3,10 +3,12 @@
 //! Start: `cargo run -p backend`
 //! Env:   copy `.env.example` to `.env` and fill in secrets.
 
+mod app;
 mod assets;
 mod auth;
 mod collaboration;
 mod config;
+mod db;
 mod error;
 mod exports;
 mod openapi;
@@ -14,22 +16,13 @@ mod projects;
 mod pusher;
 mod rate_limit;
 mod state;
+mod storage;
 mod timeline;
+mod users;
 mod workspaces;
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
-use axum::{
-    http::{header, Method},
-    response::Json,
-    routing::get,
-    Router,
-};
-use tower_http::{
-    cors::{Any, CorsLayer},
-    trace::TraceLayer,
-};
 use tracing::info;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -56,11 +49,11 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(config).await?;
     info!("database connected ✓");
 
-    let app = build_router(state);
+    let router = app::build_router(state);
 
     info!("CloudCut backend listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, router).await?;
     Ok(())
 }
 

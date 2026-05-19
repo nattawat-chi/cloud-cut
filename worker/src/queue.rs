@@ -7,7 +7,6 @@
 //! Consumer group: `cloudcut-workers`
 //! Consumer name:  `worker-{hostname}`
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,11 +14,11 @@ use redis::{AsyncCommands, RedisResult};
 use sqlx::PgPool;
 use tokio::time::sleep;
 
-use crate::{config::Config, error::WorkerError, jobs};
+use crate::{config::Config, error::WorkerError, processor};
 
-const GROUP: &str = "cloudcut-workers";
-const EXPORT_STREAM: &str = "cloudcut:exports";
-const ASSET_STREAM: &str = "cloudcut:assets";
+pub const GROUP: &str = "cloudcut-workers";
+pub const EXPORT_STREAM: &str = "cloudcut:exports";
+pub const ASSET_STREAM: &str = "cloudcut:assets";
 const BLOCK_MS: usize = 5_000; // block for 5s on empty stream
 
 pub struct ConsumerContext {
@@ -90,12 +89,10 @@ async fn read_and_process(ctx: Arc<ConsumerContext>) -> Result<(), WorkerError> 
         let msg_id2 = msg_id.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = dispatch(&ctx2, &stream2, &fields).await {
+            if let Err(e) = processor::dispatch(&stream2, &fields, &ctx2.db, &ctx2.config, &ctx2.s3).await {
                 tracing::error!(stream=%stream2, msg_id=%msg_id2, error=%e, "job failed");
-                // Retry logic: check delivery count via XPENDING; DLQ if exceeded
                 let _ = maybe_dead_letter(&ctx2, &stream2, &msg_id2, &e).await;
             } else {
-                // ACK on success
                 let mut conn2 = ctx2.redis.get_multiplexed_async_connection().await.unwrap();
                 let _: RedisResult<i64> = conn2.xack(&stream2, GROUP, &[&msg_id2]).await;
                 tracing::debug!(stream=%stream2, msg_id=%msg_id2, "job acked");
@@ -106,22 +103,6 @@ async fn read_and_process(ctx: Arc<ConsumerContext>) -> Result<(), WorkerError> 
     Ok(())
 }
 
-async fn dispatch(
-    ctx: &ConsumerContext,
-    stream: &str,
-    fields: &jobs::JobFields,
-) -> Result<(), WorkerError> {
-    match stream {
-        EXPORT_STREAM => {
-            jobs::export::run(fields, &ctx.db, &ctx.config, &ctx.s3).await
-        }
-        ASSET_STREAM => {
-            jobs::process_asset::run(fields, &ctx.db, &ctx.config, &ctx.s3).await
-        }
-        other => Err(WorkerError::Other(format!("unknown stream: {other}"))),
-    }
-}
-
 async fn maybe_dead_letter(
     ctx: &ConsumerContext,
     stream: &str,
@@ -130,7 +111,6 @@ async fn maybe_dead_letter(
 ) -> Result<(), WorkerError> {
     let mut conn = ctx.redis.get_multiplexed_async_connection().await?;
 
-    // XPENDING returns delivery count for this specific message
     let pending: redis::Value = redis::cmd("XPENDING")
         .arg(stream).arg(GROUP).arg(msg_id).arg(msg_id).arg(1)
         .query_async(&mut conn)
@@ -144,7 +124,6 @@ async fn maybe_dead_letter(
             stream, msg_id, deliveries=delivery_count, error=%err,
             "max retries exceeded — dead-lettering message"
         );
-        // Move to DLQ stream
         let dlq = format!("{stream}:dlq");
         let kv: Vec<(&str, String)> = vec![
             ("original_stream", stream.to_owned()),
@@ -152,18 +131,13 @@ async fn maybe_dead_letter(
             ("error", err.to_string()),
         ];
         let _: RedisResult<String> = conn.xadd(&dlq, "*", &kv).await;
-
-        // ACK so the original stream doesn't keep re-delivering
         let _: RedisResult<i64> = conn.xack(stream, GROUP, &[msg_id]).await;
     }
-    // If under max retries: do NOT ack — Redis will re-deliver after visibility timeout
 
     Ok(())
 }
 
-/// Parse the nested `redis::Value` returned by XREADGROUP into flat
-/// `(stream_name, message_id, fields)` tuples.
-fn parse_xreadgroup_reply(reply: redis::Value) -> Vec<(String, String, jobs::JobFields)> {
+fn parse_xreadgroup_reply(reply: redis::Value) -> Vec<(String, String, processor::JobFields)> {
     let mut out = Vec::new();
 
     let streams = match reply {
@@ -205,7 +179,7 @@ fn parse_xreadgroup_reply(reply: redis::Value) -> Vec<(String, String, jobs::Job
                 _ => continue,
             };
 
-            let mut fields = HashMap::new();
+            let mut fields = std::collections::HashMap::new();
             for kv in field_list.chunks(2) {
                 if kv.len() < 2 { continue; }
                 let k = match &kv[0] {
@@ -227,7 +201,6 @@ fn parse_xreadgroup_reply(reply: redis::Value) -> Vec<(String, String, jobs::Job
 }
 
 fn extract_delivery_count(val: &redis::Value) -> Option<usize> {
-    // XPENDING with explicit ID returns: [[id, consumer, idle_ms, delivery_count], ...]
     if let redis::Value::Array(outer) = val {
         if let Some(redis::Value::Array(inner)) = outer.first() {
             if let Some(redis::Value::Int(count)) = inner.get(3) {
