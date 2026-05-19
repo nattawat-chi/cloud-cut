@@ -13,17 +13,32 @@ use crate::{
     error::AppError,
     projects::models::{CreateProjectReq, ListQuery, PagedProjects, ProjectRow, UpdateProjectReq},
     state::AppState,
+    workspaces::authz::{require_workspace_role, Role},
 };
 
 // ─── GET /api/v1/workspaces/:workspace_id/projects ───────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/workspaces/{workspace_id}/projects",
+    params(
+        ("workspace_id" = Uuid, Path, description = "Workspace UUID"),
+        ListQuery,
+    ),
+    responses(
+        (status = 200, description = "Paginated projects", body = PagedProjects),
+        (status = 403, description = "Not a workspace member"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn list_projects(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(workspace_id): Path<Uuid>,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<PagedProjects>, AppError> {
-    require_workspace_member(&state, workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, workspace_id, auth.user_id, Role::Viewer).await?;
 
     let limit = q.limit.unwrap_or(20).clamp(1, 100);
     let (cursor_ts, cursor_id) = decode_cursor(q.cursor.as_deref())?;
@@ -52,6 +67,18 @@ pub async fn list_projects(
 
 // ─── POST /api/v1/workspaces/:workspace_id/projects ──────────────────────────
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/workspaces/{workspace_id}/projects",
+    params(("workspace_id" = Uuid, Path, description = "Workspace UUID")),
+    request_body = CreateProjectReq,
+    responses(
+        (status = 201, description = "Project created", body = ProjectRow),
+        (status = 403, description = "Insufficient role — editor+ required"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn create_project(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -59,7 +86,7 @@ pub async fn create_project(
     Json(req): Json<CreateProjectReq>,
 ) -> Result<(StatusCode, Json<ProjectRow>), AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
-    require_workspace_member(&state, workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, workspace_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, ProjectRow>(
         r#"
@@ -84,18 +111,41 @@ pub async fn create_project(
 
 // ─── GET /api/v1/projects/:id ─────────────────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/projects/{id}",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    responses(
+        (status = 200, description = "Project detail", body = ProjectRow),
+        (status = 404, description = "Project not found or archived"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn get_project(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<ProjectRow>, AppError> {
     let row = fetch_project(&state, project_id).await?;
-    require_workspace_member(&state, row.workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, row.workspace_id, auth.user_id, Role::Viewer).await?;
     Ok(Json(row))
 }
 
 // ─── PATCH /api/v1/projects/:id ───────────────────────────────────────────────
 
+#[utoipa::path(
+    patch,
+    path = "/api/v1/projects/{id}",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    request_body = UpdateProjectReq,
+    responses(
+        (status = 200, description = "Updated project", body = ProjectRow),
+        (status = 403, description = "Insufficient role — editor+ required"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn update_project(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -104,7 +154,7 @@ pub async fn update_project(
 ) -> Result<Json<ProjectRow>, AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
     let existing = fetch_project(&state, project_id).await?;
-    require_workspace_member(&state, existing.workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, existing.workspace_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, ProjectRow>(
         r#"
@@ -131,13 +181,24 @@ pub async fn update_project(
 
 // ─── DELETE /api/v1/projects/:id (archive) ────────────────────────────────────
 
+#[utoipa::path(
+    delete,
+    path = "/api/v1/projects/{id}",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    responses(
+        (status = 204, description = "Project archived"),
+        (status = 403, description = "Insufficient role — admin+ required"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
 pub async fn archive_project(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     let existing = fetch_project(&state, project_id).await?;
-    require_workspace_member(&state, existing.workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, existing.workspace_id, auth.user_id, Role::Admin).await?;
 
     sqlx::query("UPDATE projects SET archived = true WHERE id = $1")
         .bind(project_id)
@@ -159,22 +220,6 @@ async fn fetch_project(state: &AppState, id: Uuid) -> Result<ProjectRow, AppErro
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound("project".into()))
-}
-
-async fn require_workspace_member(
-    state: &AppState,
-    workspace_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2)",
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-
-    if exists { Ok(()) } else { Err(AppError::Forbidden) }
 }
 
 /// Cursor encodes `"{updated_at_rfc3339}|{uuid}"` as URL-safe base64.

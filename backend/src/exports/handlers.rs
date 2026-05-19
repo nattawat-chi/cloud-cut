@@ -11,13 +11,28 @@ use crate::{
     auth::extractor::AuthUser,
     error::AppError,
     exports::models::{CreateExportReq, ExportJobCreated, ExportJobRow},
+    rate_limit,
     state::AppState,
+    workspaces::authz::{require_project_role, Role},
 };
 
 const EXPORT_STREAM: &str = "cloudcut:exports";
 
 // ─── POST /api/v1/projects/:id/exports ────────────────────────────────────────
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/projects/{id}/exports",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    request_body = CreateExportReq,
+    responses(
+        (status = 202, description = "Export job enqueued", body = ExportJobCreated),
+        (status = 403, description = "Insufficient role — editor+ required"),
+        (status = 429, description = "Concurrent export limit reached for this workspace plan"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "exports",
+)]
 pub async fn create_export(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -44,8 +59,14 @@ pub async fn create_export(
         )));
     }
 
-    // Verify caller has project access
-    require_project_access(&state, project_id, auth.user_id).await?;
+    // Verify caller has project access — export requires editor+ per §2.6.
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
+
+    // Concurrent-export rate limit (§3.10).  Slot is taken now and must be
+    // released by the worker via rate_limit::release_export_slot when the
+    // job reaches a terminal state.
+    let workspace_id = rate_limit::workspace_for_project(&state, project_id).await?;
+    rate_limit::check_concurrent_exports(&state, workspace_id).await?;
 
     let job = sqlx::query_as::<_, ExportJobRow>(
         r#"
@@ -73,6 +94,17 @@ pub async fn create_export(
 
 // ─── GET /api/v1/exports/:id ──────────────────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/exports/{id}",
+    params(("id" = Uuid, Path, description = "Export job UUID")),
+    responses(
+        (status = 200, description = "Export job status", body = ExportJobRow),
+        (status = 404, description = "Export job not found"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "exports",
+)]
 pub async fn get_export(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -88,18 +120,28 @@ pub async fn get_export(
     .await?
     .ok_or_else(|| AppError::NotFound("export job".into()))?;
 
-    require_project_access(&state, job.project_id, auth.user_id).await?;
+    require_project_role(&state, job.project_id, auth.user_id, Role::Viewer).await?;
     Ok(Json(job))
 }
 
 // ─── GET /api/v1/projects/:id/exports ─────────────────────────────────────────
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/projects/{id}/exports",
+    params(("id" = Uuid, Path, description = "Project UUID")),
+    responses(
+        (status = 200, description = "Export jobs for this project (last 50)", body = Vec<ExportJobRow>),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "exports",
+)]
 pub async fn list_exports(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<ExportJobRow>>, AppError> {
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Viewer).await?;
 
     let jobs = sqlx::query_as::<_, ExportJobRow>(
         r#"SELECT id, project_id, requested_by, status::text AS status, format::text AS format, resolution::text AS resolution, output_key,
@@ -117,30 +159,6 @@ pub async fn list_exports(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async fn require_project_access(
-    state: &AppState,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let workspace_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT workspace_id FROM projects WHERE id = $1 AND archived = false",
-    )
-    .bind(project_id)
-    .fetch_optional(&state.db)
-    .await?;
-    let ws_id = workspace_id.ok_or_else(|| AppError::NotFound("project".into()))?;
-
-    let is_member: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2)",
-    )
-    .bind(ws_id)
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-
-    if is_member { Ok(()) } else { Err(AppError::Forbidden) }
-}
 
 /// Push a message to the Redis Stream `cloudcut:exports`.
 /// The worker reads from this stream via `XREADGROUP`.
