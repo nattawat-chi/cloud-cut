@@ -3,6 +3,7 @@
 use crate::error::WorkerError;
 
 /// Remove temp files older than `max_age_secs` from the system temp directory.
+#[allow(dead_code)]
 pub async fn purge_old_temp_files(max_age_secs: u64) -> Result<usize, WorkerError> {
     let tmp = std::env::temp_dir();
     let cutoff = std::time::SystemTime::now()
