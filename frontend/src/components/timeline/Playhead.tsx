@@ -1,4 +1,4 @@
-import { msToPx } from '@/utils/geometry';
+import { msToPx } from "@/utils/geometry";
 
 interface PlayheadProps {
   currentTimeMs: number;
@@ -14,8 +14,8 @@ export function Playhead({ currentTimeMs, zoomLevel }: PlayheadProps) {
   const left = msToPx(currentTimeMs, zoomLevel);
   return (
     <div
-      className="pointer-events-none absolute top-0 bottom-0 z-[6]"
-      style={{ left, width: 1, background: 'var(--accent)' }}
+      className="pointer-events-none absolute top-0 bottom-0 z-6"
+      style={{ left, width: 1, background: "var(--accent)" }}
     >
       <div
         className="absolute"
@@ -24,8 +24,8 @@ export function Playhead({ currentTimeMs, zoomLevel }: PlayheadProps) {
           left: -7,
           width: 15,
           height: 12,
-          background: 'var(--accent)',
-          clipPath: 'polygon(0 0, 100% 0, 50% 100%)',
+          background: "var(--accent)",
+          clipPath: "polygon(0 0, 100% 0, 50% 100%)",
         }}
       />
     </div>
