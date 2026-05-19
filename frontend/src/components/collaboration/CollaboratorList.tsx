@@ -46,7 +46,7 @@ interface ClipSplitPayload {
   readonly clips: readonly ClipUpdatedPayload['clip'][];
 }
 
-export function CollabClient(): null {
+export function CollaboratorList(): null {
   useRealtime();
   return null;
 }

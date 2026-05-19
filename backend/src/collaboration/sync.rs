@@ -3,8 +3,8 @@ use serde::Deserialize;
 
 use crate::{
     auth::extractor::AuthUser,
+    collaboration::pusher::AuthResponse,
     error::AppError,
-    pusher::client::AuthResponse,
     state::AppState,
 };
 
@@ -31,7 +31,6 @@ pub async fn channel_auth(
         .ok_or_else(|| AppError::BadRequest("pusher not configured".into()))?;
 
     if form.channel_name.starts_with("presence-") {
-        // Pull display info so other members can render an avatar / name
         let row: Option<(String, Option<String>)> = sqlx::query_as(
             "SELECT display_name, avatar_url FROM users WHERE id = $1",
         )

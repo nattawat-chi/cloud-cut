@@ -11,7 +11,7 @@ use validator::Validate;
 use crate::{
     auth::extractor::AuthUser,
     error::AppError,
-    pusher::publish_project_event,
+    collaboration::publish_project_event,
     state::AppState,
     timeline::models::{
         AddClipReq, AddEffectReq, ClipRow, CreateTrackReq, EffectRow, SplitClipReq,

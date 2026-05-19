@@ -3,12 +3,16 @@
 //! Start: `cargo run -p worker`
 //! Env:   copy `.env.example` to `.env`
 
+mod asset_pipeline;
+mod cleanup;
 mod config;
-mod consumer;
 mod error;
+mod export_pipeline;
 mod ffmpeg;
-mod jobs;
-mod s3;
+mod processor;
+mod progress;
+mod queue;
+mod storage;
 
 use std::sync::Arc;
 
@@ -16,7 +20,7 @@ use sqlx::PgPool;
 use tracing::info;
 
 use config::Config;
-use consumer::ConsumerContext;
+use queue::ConsumerContext;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -39,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
     info!("database connected ✓");
 
     let redis = redis::Client::open(config.redis_url.as_str())?;
-    let s3 = s3::build_client(&config);
+    let s3 = storage::build_client(&config);
 
     let consumer_name = format!(
         "worker-{}",
@@ -59,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
     info!(consumer = %consumer_name, "CloudCut worker started");
 
     // Run the consumer loop — blocks forever
-    consumer::run(ctx).await;
+    queue::run(ctx).await;
 
     Ok(())
 }

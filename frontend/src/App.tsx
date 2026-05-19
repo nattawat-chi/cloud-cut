@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { AuthPage } from '@/components/auth/AuthPage';
-import { CollabClient } from '@/components/collaboration/CollabClient';
+import { CollaboratorList } from '@/components/collaboration/CollaboratorList';
 import { EditorLayout } from '@/components/layout/EditorLayout';
 import { EffectsBrowser } from '@/components/overlays/EffectsBrowser';
 import { ExportDialog } from '@/components/overlays/ExportDialog';
@@ -73,7 +73,7 @@ export default function App() {
   return (
     <>
       <EditorLayout />
-      <CollabClient />
+      <CollaboratorList />
       <HistoryPanel />
       <ShortcutsOverlay />
       <EffectsBrowser />

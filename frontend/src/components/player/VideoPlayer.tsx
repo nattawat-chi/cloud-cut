@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { ViewportCursors } from '@/components/collaboration/ViewportCursors';
+import { RemoteCursors } from '@/components/collaboration/RemoteCursors';
 import { PanelHead } from '@/components/shared/PanelHead';
 import { usePlaybackTicker } from '@/hooks/usePlaybackTicker';
 import { useAssetsStore } from '@/state/assetsStore';
@@ -98,7 +98,7 @@ export function VideoPlayer() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-surface-0">
-      <ViewportCursors />
+      <RemoteCursors />
       <PanelHead
         title="Preview"
         tools={

@@ -50,8 +50,7 @@ impl PusherClient {
 
     // ─── Channel auth (called by POST /pusher/auth) ───────────────────────────
 
-    /// Sign a presence-channel subscription. `user_data` is a JSON object the
-    /// client will receive as part of the member info.
+    /// Sign a presence-channel subscription.
     pub fn sign_presence(
         &self,
         socket_id: &str,
@@ -109,7 +108,6 @@ impl PusherClient {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // Query params must be sorted alphabetically for the signature to match.
         let query = format!(
             "auth_key={}&auth_timestamp={}&auth_version=1.0&body_md5={}",
             self.key, auth_timestamp, body_md5
@@ -136,8 +134,6 @@ impl PusherClient {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            // Surface the exact body that failed signing so we can reproduce
-            // it offline with curl + the right secret.
             tracing::warn!(
                 status = %status,
                 body = %body,

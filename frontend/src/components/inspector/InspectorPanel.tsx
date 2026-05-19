@@ -12,7 +12,7 @@ import { useUIStore } from '@/state/uiStore';
 import type { InspectorTab } from '@/types';
 
 import { EffectsTab } from './EffectsTab';
-import { PropsTab } from './PropsTab';
+import { ClipInfo } from './ClipInfo';
 
 const TABS: ReadonlyArray<{ id: InspectorTab; label: string; disabled?: boolean }> = [
   { id: 'props',   label: 'Properties' },
@@ -103,7 +103,7 @@ export function InspectorPanel() {
         ))}
       </div>
 
-      {tab === 'props' && <PropsTab clip={clip} asset={asset} />}
+      {tab === 'props' && <ClipInfo clip={clip} asset={asset} />}
       {tab === 'effects' && <EffectsTab clip={clip} />}
       {tab === 'audio' && null}
     </div>

@@ -14,7 +14,7 @@ import { Playhead } from './Playhead';
 import { TimelineClip } from './TimelineClip';
 import { TimelineRuler } from './TimelineRuler';
 import { TimelineToolbar } from './TimelineToolbar';
-import { TrackHeader } from './TrackHeader';
+import { TimelineTrack } from './TimelineTrack';
 
 const SNAP_THRESHOLD_PX = 14;
 
@@ -245,7 +245,7 @@ export function Timeline() {
           />
           <div className="flex-1 overflow-hidden">
             {visibleTracks.map((tr) => (
-              <TrackHeader key={tr.id} track={tr} />
+              <TimelineTrack key={tr.id} track={tr} />
             ))}
           </div>
         </div>

@@ -8,7 +8,7 @@ import { useUIStore } from '@/state/uiStore';
  * the player area. Pointer-events are disabled so they never intercept
  * clicks on the stage / transport controls.
  */
-export function ViewportCursors() {
+export function RemoteCursors() {
   const cursors = useCollabStore((s) => s.cursors);
   const collaborators = useCollabStore((s) => s.collaborators);
   const showPresence = useUIStore((s) => s.showPresence);
