@@ -1,3 +1,5 @@
+pub mod authz;
+
 use axum::{extract::State, routing::get, Json, Router};
 use chrono::{DateTime, Utc};
 use serde::Serialize;

@@ -12,6 +12,7 @@ use crate::{
     error::AppError,
     exports::models::{CreateExportReq, ExportJobCreated, ExportJobRow},
     state::AppState,
+    workspaces::authz::{require_project_role, Role},
 };
 
 const EXPORT_STREAM: &str = "cloudcut:exports";
@@ -44,8 +45,8 @@ pub async fn create_export(
         )));
     }
 
-    // Verify caller has project access
-    require_project_access(&state, project_id, auth.user_id).await?;
+    // Verify caller has project access — export requires editor+ per §2.6.
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let job = sqlx::query_as::<_, ExportJobRow>(
         r#"
@@ -88,7 +89,7 @@ pub async fn get_export(
     .await?
     .ok_or_else(|| AppError::NotFound("export job".into()))?;
 
-    require_project_access(&state, job.project_id, auth.user_id).await?;
+    require_project_role(&state, job.project_id, auth.user_id, Role::Viewer).await?;
     Ok(Json(job))
 }
 
@@ -99,7 +100,7 @@ pub async fn list_exports(
     auth: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<ExportJobRow>>, AppError> {
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Viewer).await?;
 
     let jobs = sqlx::query_as::<_, ExportJobRow>(
         r#"SELECT id, project_id, requested_by, status::text AS status, format::text AS format, resolution::text AS resolution, output_key,
@@ -117,30 +118,6 @@ pub async fn list_exports(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async fn require_project_access(
-    state: &AppState,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let workspace_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT workspace_id FROM projects WHERE id = $1 AND archived = false",
-    )
-    .bind(project_id)
-    .fetch_optional(&state.db)
-    .await?;
-    let ws_id = workspace_id.ok_or_else(|| AppError::NotFound("project".into()))?;
-
-    let is_member: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2)",
-    )
-    .bind(ws_id)
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-
-    if is_member { Ok(()) } else { Err(AppError::Forbidden) }
-}
 
 /// Push a message to the Redis Stream `cloudcut:exports`.
 /// The worker reads from this stream via `XREADGROUP`.

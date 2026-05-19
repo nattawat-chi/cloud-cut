@@ -17,6 +17,7 @@ use crate::{
         AddClipReq, AddEffectReq, ClipRow, CreateTrackReq, EffectRow, SplitClipReq,
         TimelineSnapshot, TrackRow, UpdateClipReq, UpdateEffectReq, UpdateTrackReq,
     },
+    workspaces::authz::{require_project_role, Role},
 };
 
 // ─── GET /api/v1/projects/:id/timeline ────────────────────────────────────────
@@ -27,7 +28,7 @@ pub async fn get_timeline(
     auth: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<TimelineSnapshot>, AppError> {
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Viewer).await?;
 
     let (tracks, clips, all_effects) = tokio::try_join!(
         fetch_tracks(&state, project_id),
@@ -51,7 +52,7 @@ pub async fn list_tracks(
     auth: AuthUser,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<Vec<TrackRow>>, AppError> {
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Viewer).await?;
     Ok(Json(fetch_tracks(&state, project_id).await?))
 }
 
@@ -62,7 +63,7 @@ pub async fn create_track(
     Json(req): Json<CreateTrackReq>,
 ) -> Result<(StatusCode, Json<TrackRow>), AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let valid_kinds = ["video", "audio", "subtitle"];
     if !valid_kinds.contains(&req.kind.as_str()) {
@@ -97,7 +98,7 @@ pub async fn update_track(
     Json(req): Json<UpdateTrackReq>,
 ) -> Result<Json<TrackRow>, AppError> {
     let project_id = track_project_id(&state, track_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, TrackRow>(
         r#"
@@ -127,7 +128,7 @@ pub async fn delete_track(
     Path(track_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     let project_id = track_project_id(&state, track_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     sqlx::query("DELETE FROM tracks WHERE id = $1")
         .bind(track_id)
@@ -147,7 +148,7 @@ pub async fn add_clip(
 ) -> Result<(StatusCode, Json<ClipRow>), AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
     let project_id = track_project_id(&state, track_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, ClipRow>(
         r#"
@@ -183,7 +184,7 @@ pub async fn update_clip(
     Json(req): Json<UpdateClipReq>,
 ) -> Result<Json<ClipRow>, AppError> {
     let (project_id, track_id) = clip_project_track(&state, clip_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let target_track = req.track_id.unwrap_or(track_id);
 
@@ -229,7 +230,7 @@ pub async fn delete_clip(
     Path(clip_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     let (project_id, _) = clip_project_track(&state, clip_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     sqlx::query("DELETE FROM clips WHERE id = $1")
         .bind(clip_id)
@@ -254,7 +255,7 @@ pub async fn split_clip(
     Json(req): Json<SplitClipReq>,
 ) -> Result<Json<Vec<ClipRow>>, AppError> {
     let (project_id, _) = clip_project_track(&state, clip_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let original = fetch_clip(&state, clip_id).await?;
 
@@ -323,7 +324,7 @@ pub async fn add_effect(
 ) -> Result<(StatusCode, Json<EffectRow>), AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
     let (project_id, _) = clip_project_track(&state, clip_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, EffectRow>(
         r#"
@@ -350,7 +351,7 @@ pub async fn update_effect(
     Json(req): Json<UpdateEffectReq>,
 ) -> Result<Json<EffectRow>, AppError> {
     let (project_id, _clip_id) = effect_project_clip(&state, effect_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, EffectRow>(
         r#"
@@ -378,7 +379,7 @@ pub async fn delete_effect(
     Path(effect_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     let (project_id, _) = effect_project_clip(&state, effect_id).await?;
-    require_project_access(&state, project_id, auth.user_id).await?;
+    require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     sqlx::query("DELETE FROM clip_effects WHERE id = $1")
         .bind(effect_id)
@@ -389,31 +390,6 @@ pub async fn delete_effect(
 }
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
-
-async fn require_project_access(
-    state: &AppState,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let workspace_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT workspace_id FROM projects WHERE id = $1 AND archived = false",
-    )
-    .bind(project_id)
-    .fetch_optional(&state.db)
-    .await?;
-
-    let workspace_id = workspace_id.ok_or_else(|| AppError::NotFound("project".into()))?;
-
-    let is_member: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2)",
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-
-    if is_member { Ok(()) } else { Err(AppError::Forbidden) }
-}
 
 async fn track_project_id(state: &AppState, track_id: Uuid) -> Result<Uuid, AppError> {
     sqlx::query_scalar::<_, Uuid>("SELECT project_id FROM tracks WHERE id = $1")

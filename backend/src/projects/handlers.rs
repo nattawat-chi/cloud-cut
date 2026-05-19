@@ -13,6 +13,7 @@ use crate::{
     error::AppError,
     projects::models::{CreateProjectReq, ListQuery, PagedProjects, ProjectRow, UpdateProjectReq},
     state::AppState,
+    workspaces::authz::{require_workspace_role, Role},
 };
 
 // ─── GET /api/v1/workspaces/:workspace_id/projects ───────────────────────────
@@ -23,7 +24,7 @@ pub async fn list_projects(
     Path(workspace_id): Path<Uuid>,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<PagedProjects>, AppError> {
-    require_workspace_member(&state, workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, workspace_id, auth.user_id, Role::Viewer).await?;
 
     let limit = q.limit.unwrap_or(20).clamp(1, 100);
     let (cursor_ts, cursor_id) = decode_cursor(q.cursor.as_deref())?;
@@ -59,7 +60,7 @@ pub async fn create_project(
     Json(req): Json<CreateProjectReq>,
 ) -> Result<(StatusCode, Json<ProjectRow>), AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
-    require_workspace_member(&state, workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, workspace_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, ProjectRow>(
         r#"
@@ -90,7 +91,7 @@ pub async fn get_project(
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<ProjectRow>, AppError> {
     let row = fetch_project(&state, project_id).await?;
-    require_workspace_member(&state, row.workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, row.workspace_id, auth.user_id, Role::Viewer).await?;
     Ok(Json(row))
 }
 
@@ -104,7 +105,7 @@ pub async fn update_project(
 ) -> Result<Json<ProjectRow>, AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
     let existing = fetch_project(&state, project_id).await?;
-    require_workspace_member(&state, existing.workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, existing.workspace_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, ProjectRow>(
         r#"
@@ -137,7 +138,7 @@ pub async fn archive_project(
     Path(project_id): Path<Uuid>,
 ) -> Result<StatusCode, AppError> {
     let existing = fetch_project(&state, project_id).await?;
-    require_workspace_member(&state, existing.workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, existing.workspace_id, auth.user_id, Role::Admin).await?;
 
     sqlx::query("UPDATE projects SET archived = true WHERE id = $1")
         .bind(project_id)
@@ -159,22 +160,6 @@ async fn fetch_project(state: &AppState, id: Uuid) -> Result<ProjectRow, AppErro
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound("project".into()))
-}
-
-async fn require_workspace_member(
-    state: &AppState,
-    workspace_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2)",
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-
-    if exists { Ok(()) } else { Err(AppError::Forbidden) }
 }
 
 /// Cursor encodes `"{updated_at_rfc3339}|{uuid}"` as URL-safe base64.

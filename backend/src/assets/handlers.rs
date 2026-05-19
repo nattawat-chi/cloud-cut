@@ -17,6 +17,7 @@ use crate::{
     auth::extractor::AuthUser,
     error::AppError,
     state::AppState,
+    workspaces::authz::{require_workspace_role, Role},
 };
 
 // ─── GET /api/v1/workspaces/:workspace_id/assets ──────────────────────────────
@@ -27,7 +28,7 @@ pub async fn list_assets(
     Path(workspace_id): Path<Uuid>,
     Query(q): Query<ListAssetsQuery>,
 ) -> Result<Json<PagedAssets>, AppError> {
-    require_workspace_member(&state, workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, workspace_id, auth.user_id, Role::Viewer).await?;
 
     let limit = q.limit.unwrap_or(40).clamp(1, 200);
     let cursor_id = q
@@ -86,7 +87,7 @@ pub async fn presign_upload(
     Json(req): Json<PresignRequest>,
 ) -> Result<(StatusCode, Json<PresignResponse>), AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
-    require_workspace_member(&state, workspace_id, auth.user_id).await?;
+    require_workspace_role(&state, workspace_id, auth.user_id, Role::Editor).await?;
 
     let valid_kinds = ["video", "audio", "image", "font"];
     if !valid_kinds.contains(&req.kind.as_str()) {
@@ -172,7 +173,7 @@ pub async fn update_asset_status(
             .fetch_optional(&state.db)
             .await?;
     let ws_id = ws_id.ok_or_else(|| AppError::NotFound("asset".into()))?;
-    require_workspace_member(&state, ws_id, auth.user_id).await?;
+    require_workspace_role(&state, ws_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, AssetRow>(
         r#"
@@ -221,7 +222,7 @@ pub async fn delete_asset(
             .fetch_optional(&state.db)
             .await?;
     let ws_id = ws_id.ok_or_else(|| AppError::NotFound("asset".into()))?;
-    require_workspace_member(&state, ws_id, auth.user_id).await?;
+    require_workspace_role(&state, ws_id, auth.user_id, Role::Editor).await?;
 
     // Block delete while any clip still references it — otherwise the timeline
     // would render orphan clips that crash on Inspector lookup.
@@ -264,21 +265,6 @@ async fn enqueue_processing(state: &AppState, asset_id: Uuid) -> Result<(), AppE
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async fn require_workspace_member(
-    state: &AppState,
-    workspace_id: Uuid,
-    user_id: Uuid,
-) -> Result<(), AppError> {
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=$1 AND user_id=$2)",
-    )
-    .bind(workspace_id)
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await?;
-    if exists { Ok(()) } else { Err(AppError::Forbidden) }
-}
 
 fn extension_from_filename(filename: &str) -> String {
     std::path::Path::new(filename)
