@@ -28,6 +28,9 @@ pub enum AppError {
 
     #[error("internal server error")]
     Internal(String),
+
+    #[error("{0}")]
+    RateLimited(String),
 }
 
 impl AppError {
@@ -44,6 +47,7 @@ impl AppError {
             AppError::Forbidden => StatusCode::FORBIDDEN,
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::Conflict(_) => StatusCode::CONFLICT,
+            AppError::RateLimited(_) => StatusCode::TOO_MANY_REQUESTS,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -56,6 +60,7 @@ impl AppError {
             AppError::Forbidden => "FORBIDDEN",
             AppError::NotFound(_) => "NOT_FOUND",
             AppError::Conflict(_) => "CONFLICT",
+            AppError::RateLimited(_) => "RATE_LIMITED",
             AppError::Internal(_) => "INTERNAL_ERROR",
         }
     }

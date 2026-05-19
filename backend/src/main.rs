@@ -11,6 +11,7 @@ mod error;
 mod exports;
 mod projects;
 mod pusher;
+mod rate_limit;
 mod state;
 mod timeline;
 mod workspaces;

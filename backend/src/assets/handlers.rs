@@ -16,6 +16,7 @@ use crate::{
     },
     auth::extractor::AuthUser,
     error::AppError,
+    rate_limit,
     state::AppState,
     workspaces::authz::{require_workspace_role, Role},
 };
@@ -88,6 +89,7 @@ pub async fn presign_upload(
 ) -> Result<(StatusCode, Json<PresignResponse>), AppError> {
     req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
     require_workspace_role(&state, workspace_id, auth.user_id, Role::Editor).await?;
+    rate_limit::check_upload(&state, workspace_id).await?;
 
     let valid_kinds = ["video", "audio", "image", "font"];
     if !valid_kinds.contains(&req.kind.as_str()) {

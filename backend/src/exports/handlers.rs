@@ -11,6 +11,7 @@ use crate::{
     auth::extractor::AuthUser,
     error::AppError,
     exports::models::{CreateExportReq, ExportJobCreated, ExportJobRow},
+    rate_limit,
     state::AppState,
     workspaces::authz::{require_project_role, Role},
 };
@@ -47,6 +48,12 @@ pub async fn create_export(
 
     // Verify caller has project access — export requires editor+ per §2.6.
     require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
+
+    // Concurrent-export rate limit (§3.10).  Slot is taken now and must be
+    // released by the worker via rate_limit::release_export_slot when the
+    // job reaches a terminal state.
+    let workspace_id = rate_limit::workspace_for_project(&state, project_id).await?;
+    rate_limit::check_concurrent_exports(&state, workspace_id).await?;
 
     let job = sqlx::query_as::<_, ExportJobRow>(
         r#"
