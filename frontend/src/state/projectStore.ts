@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import { projects as projectsApi, timeline as timelineApi } from '@/services/api';
 import type {
   Clip,
   ClipEffect,
@@ -23,19 +24,46 @@ import { uid } from '@/utils/id';
    PATCH; Phase 5 reconciles with Pusher broadcasts.
    ============================================================================= */
 
+/**
+ * Immutable snapshot used by the local undo stack. Holds the three slices that
+ * change during edits — project metadata (fps/resolution) doesn't get reverted.
+ */
+interface ProjectSnapshot {
+  readonly tracks: readonly Track[];
+  readonly clips: readonly Clip[];
+  readonly effects: Readonly<Record<UUID, readonly ClipEffect[]>>;
+}
+
 export interface ProjectState {
   project: Project | null;
   tracks: readonly Track[];
   clips: readonly Clip[];
   /** Effects keyed by `clip.id`. Absent key === "no effects on this clip". */
   effects: Readonly<Record<UUID, readonly ClipEffect[]>>;
+  /** Local undo stack — most-recent first. Capped to avoid unbounded growth. */
+  _undoStack: readonly ProjectSnapshot[];
+  /** Redo stack — populated when undo runs. Cleared on any new mutation. */
+  _redoStack: readonly ProjectSnapshot[];
+
+  /** Pop the latest snapshot and restore it. No-op when stack is empty.
+   *  Returns true if anything was reverted. */
+  undoLocal: () => boolean;
+  /** Redo a previously-undone mutation. Returns true on success. */
+  redoLocal: () => boolean;
+  /** True when there's at least one snapshot to undo. */
+  canUndoLocal: () => boolean;
+  /**
+   * Capture the current state onto the undo stack without changing anything
+   * else. Call this at the START of an interactive drag (mousedown) so the
+   * entire drag is one undoable step, not one snapshot per mousemove frame.
+   */
+  snapshotNow: () => void;
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
-  /**
-   * Hydrate from the mock fixture. Replaced by `loadProject(id)` calling the
-   * REST API once Phase 3 lands. Idempotent — safe to call from <App> mount.
-   */
+  /** Hydrate from the in-memory mock fixture (dev fallback). */
   loadMockProject: () => void;
+  /** Hydrate from the backend — fetches `/projects/:id` + `/projects/:id/timeline`. */
+  loadProjectFromApi: (projectId: UUID) => Promise<void>;
 
   // ── Tracks ────────────────────────────────────────────────────────────────
   toggleTrack: (trackId: UUID, key: 'muted' | 'locked' | 'visible') => void;
@@ -62,6 +90,24 @@ export interface ProjectState {
   toggleEffect: (clipId: UUID, effectId: UUID) => void;
   updateEffect: (clipId: UUID, effectId: UUID, value: number) => void;
   removeEffect: (clipId: UUID, effectId: UUID) => void;
+
+  // ── Remote ops (from Pusher) ──────────────────────────────────────────────
+  // These mirror the user-facing mutations but DON'T call back to the API —
+  // the server already has the canonical state (that's how the event got
+  // here in the first place). Calling moveClip() / deleteClips() from a
+  // Pusher handler would PATCH back to the server, which would re-broadcast
+  // the same event, which would PATCH again, … = the infinite loop that
+  // hit ERR_INSUFFICIENT_RESOURCES on every drag.
+  applyRemoteClipUpsert: (clip: {
+    id: UUID;
+    track_id: UUID;
+    asset_id: UUID | null;
+    pos_ms: number;
+    dur_ms: number;
+    trim_in_ms?: number;
+    name: string;
+  }) => void;
+  applyRemoteClipDelete: (clipId: UUID) => void;
 }
 
 const EFFECT_DEFAULTS: Record<EffectType, number> = {
@@ -71,11 +117,75 @@ const EFFECT_DEFAULTS: Record<EffectType, number> = {
   blur: 0,
 };
 
-export const useProjectStore = create<ProjectState>()((set) => ({
+const MAX_UNDO = 50;
+
+/** Snapshot the current state into the undo stack and clear the redo stack.
+ *  Call this from every user-initiated mutation BEFORE applying the change.
+ *  Hydration / undo / redo themselves never snapshot. */
+function pushSnapshot(s: ProjectState): Pick<ProjectState, '_undoStack' | '_redoStack'> {
+  const snap: ProjectSnapshot = {
+    tracks: s.tracks,
+    clips: s.clips,
+    effects: s.effects,
+  };
+  return {
+    _undoStack: [snap, ...s._undoStack].slice(0, MAX_UNDO),
+    _redoStack: [],
+  };
+}
+
+export const useProjectStore = create<ProjectState>()((set, get) => ({
   project: null,
   tracks: [],
   clips: [],
   effects: {},
+  _undoStack: [],
+  _redoStack: [],
+
+  canUndoLocal: () => get()._undoStack.length > 0,
+
+  snapshotNow: () =>
+    set((s) => ({
+      ...pushSnapshot(s),
+    })),
+
+  undoLocal: () => {
+    const s = get();
+    const [top, ...rest] = s._undoStack;
+    if (!top) return false;
+    const current: ProjectSnapshot = {
+      tracks: s.tracks,
+      clips: s.clips,
+      effects: s.effects,
+    };
+    set({
+      tracks: top.tracks,
+      clips: top.clips,
+      effects: top.effects,
+      _undoStack: rest,
+      _redoStack: [current, ...s._redoStack].slice(0, MAX_UNDO),
+    });
+    return true;
+  },
+
+  redoLocal: () => {
+    const s = get();
+    const [top, ...rest] = s._redoStack;
+    if (!top) return false;
+    const current: ProjectSnapshot = {
+      tracks: s.tracks,
+      clips: s.clips,
+      effects: s.effects,
+    };
+    set({
+      tracks: top.tracks,
+      clips: top.clips,
+      effects: top.effects,
+      _redoStack: rest,
+      _undoStack: [current, ...s._undoStack].slice(0, MAX_UNDO),
+    });
+    return true;
+  },
 
   loadMockProject: () =>
     set({
@@ -83,89 +193,228 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       tracks: MOCK_TRACKS,
       clips: MOCK_CLIPS,
       effects: MOCK_EFFECTS,
+      _undoStack: [],
+      _redoStack: [],
     }),
+
+  loadProjectFromApi: async (projectId) => {
+    const [project, snapshot] = await Promise.all([
+      projectsApi.get(projectId),
+      timelineApi.get(projectId),
+    ]);
+
+    const tracks: Track[] = snapshot.tracks
+      .filter((t) => t.kind === 'video' || t.kind === 'audio')
+      .map((t, i) => {
+        const isVideo = t.kind === 'video';
+        // Alternate colour vars within each track type
+        const colorVar = isVideo
+          ? i % 2 === 0 ? ('--clip-v-1' as const) : ('--clip-v-2' as const)
+          : i % 2 === 0 ? ('--clip-a-1' as const) : ('--clip-a-2' as const);
+        const tag = `${isVideo ? 'V' : 'A'}${Math.floor(i / 2) + 1}`;
+        return {
+          id: t.id,
+          type: isVideo ? 'video' : 'audio',
+          label: `${tag} · ${t.name}`,
+          tag,
+          colorVar,
+          muted: t.muted,
+          locked: t.locked,
+          visible: true,
+        };
+      });
+
+    const clips: Clip[] = snapshot.clips.map((c) => ({
+      id: c.id,
+      trackId: c.track_id,
+      assetId: c.asset_id ?? '',
+      name: c.name,
+      posMs: c.pos_ms,
+      durMs: c.dur_ms,
+      inPointMs: c.trim_in_ms,
+      outPointMs: c.trim_in_ms + c.dur_ms,
+      transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+      version: c.version,
+    }));
+
+    const effects: Record<UUID, ClipEffect[]> = {};
+    for (const [clipId, list] of Object.entries(snapshot.effects)) {
+      effects[clipId] = list
+        .filter((fx) => (['brightness', 'contrast', 'saturation', 'blur'] as const).includes(fx.type as EffectType))
+        .map((fx) => ({
+          id: fx.id,
+          type: fx.type as EffectType,
+          enabled: fx.enabled,
+          value: fx.value,
+        }));
+    }
+
+    set({
+      project: {
+        id: project.id,
+        name: project.name,
+        workspace: project.workspace_id,
+        fps: project.fps,
+        resolution: `${project.resolution_w}×${project.resolution_h}`,
+        durationMs: project.duration_ms,
+      },
+      tracks,
+      clips,
+      effects,
+      // Hydration resets the undo history — you can't undo back past a project load.
+      _undoStack: [],
+      _redoStack: [],
+    });
+  },
 
   toggleTrack: (trackId, key) =>
     set((s) => ({
+      ...pushSnapshot(s),
       tracks: s.tracks.map((t) =>
         t.id === trackId ? { ...t, [key]: !t[key] } : t,
       ),
     })),
 
   addClip: ({ trackId, assetId, posMs, durMs, name, thumbs }) => {
-    const id = uid('c');
+    // Optimistic local insert with a temp id so the UI responds instantly.
+    // Server returns the real UUID; we swap the temp id in-place once it lands.
+    // pxToMs(...) returns floats; round so JSON serialises an integer and
+    // the backend's `i64` deserialiser doesn't reject the payload with 422.
+    const safePos = Math.max(0, Math.round(posMs));
+    const safeDur = Math.max(400, Math.round(durMs));
+    const tmpId = uid('c-tmp');
     set((s) => ({
+      ...pushSnapshot(s),
       clips: [
         ...s.clips,
         {
-          id,
+          id: tmpId,
           trackId,
           assetId,
           name,
-          posMs: Math.max(0, posMs),
-          durMs: Math.max(400, durMs),
+          posMs: safePos,
+          durMs: safeDur,
           inPointMs: 0,
-          outPointMs: Math.max(400, durMs),
+          outPointMs: safeDur,
           transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
           thumbs,
           version: 1,
         },
       ],
     }));
-    return id;
+
+    // Persist — if this fails the clip stays in local state but won't reappear
+    // after reload. Logging is enough; the toast system would be too noisy
+    // for the fast drag-drop path.
+    void timelineApi
+      .addClip(trackId, {
+        asset_id: assetId,
+        pos_ms: safePos,
+        dur_ms: safeDur,
+        name,
+      })
+      .then((serverClip) => {
+        set((s) => ({
+          clips: s.clips.map((c) =>
+            c.id === tmpId ? { ...c, id: serverClip.id } : c,
+          ),
+        }));
+      })
+      .catch((e) => {
+        console.warn('addClip persist failed:', e);
+      });
+    return tmpId;
   },
 
-  moveClip: (clipId, newPosMs, newTrackId) =>
+  moveClip: (clipId, newPosMs, newTrackId) => {
+    const safePos = Math.max(0, Math.round(newPosMs));
+    // No pushSnapshot here — caller must call snapshotNow() once at drag-start
+    // (mousedown). Snapshotting on every mousemove would fill the undo stack
+    // with intermediate positions and make Undo roll back only one frame.
     set((s) => ({
       clips: s.clips.map((c) =>
         c.id === clipId
           ? {
               ...c,
-              posMs: Math.max(0, newPosMs),
+              posMs: safePos,
               trackId: newTrackId ?? c.trackId,
               version: c.version + 1,
             }
           : c,
       ),
-    })),
+    }));
+    // Don't PATCH temp-id clips — addClip's promise will land first and
+    // remap them; until then there's no server-side row to update.
+    if (clipId.startsWith('c-tmp')) return;
+    void timelineApi
+      .updateClip(clipId, {
+        pos_ms: safePos,
+        ...(newTrackId ? { track_id: newTrackId } : {}),
+      })
+      .catch((e) => console.warn('moveClip persist failed:', e));
+  },
 
-  resizeClip: (clipId, newPosMs, newDurMs) =>
+  resizeClip: (clipId, newPosMs, newDurMs) => {
+    const safePos = Math.max(0, Math.round(newPosMs));
+    const safeDur = Math.max(400, Math.round(newDurMs));
+    // No pushSnapshot here — same rationale as moveClip above.
     set((s) => ({
       clips: s.clips.map((c) =>
         c.id === clipId
           ? {
               ...c,
-              posMs: Math.max(0, newPosMs),
-              durMs: Math.max(400, newDurMs),
+              posMs: safePos,
+              durMs: safeDur,
               version: c.version + 1,
             }
           : c,
       ),
-    })),
+    }));
+    if (clipId.startsWith('c-tmp')) return;
+    void timelineApi
+      .updateClip(clipId, {
+        pos_ms: safePos,
+        dur_ms: safeDur,
+      })
+      .catch((e) => console.warn('resizeClip persist failed:', e));
+  },
 
-  trimClip: (clipId, _side, newDurMs) =>
+  trimClip: (clipId, _side, newDurMs) => {
+    const safeDur = Math.max(400, Math.round(newDurMs));
     set((s) => ({
-      // Minimum clip duration of 400ms — same guardrail as the prototype's
-      // drag handler. Prevents zero-width clips that break the layout.
+      ...pushSnapshot(s),
       clips: s.clips.map((c) =>
         c.id === clipId
-          ? { ...c, durMs: Math.max(400, newDurMs), version: c.version + 1 }
+          ? { ...c, durMs: safeDur, version: c.version + 1 }
           : c,
       ),
-    })),
+    }));
+  },
 
-  splitClipAt: (clipId, atMs) =>
+  splitClipAt: (clipId, atMs) => {
+    const safeAt = Math.round(atMs);
+    let rightTmpId: UUID | null = null;
+    let splitLocalMs = 0; // distance from clip start to the split point
+
     set((s) => {
       const out: Clip[] = [];
       for (const c of s.clips) {
-        const local = atMs - c.posMs;
-        if (c.id === clipId && local > 200 && local < c.durMs - 200) {
+        const local = safeAt - c.posMs;
+        // 400ms minimum on each half — matches the Postgres CHECK on
+        // clips.dur_ms and the backend split guard. A 200ms guard here
+        // would let the user split a 500ms clip into two 250ms halves
+        // and only fail on the API roundtrip (with a "clips_dur_ms_check
+        // violation" message), leaving the local state out of sync with
+        // the database.
+        if (c.id === clipId && local >= 400 && local <= c.durMs - 400) {
           const halfThumbs = c.thumbs ? c.thumbs.slice(Math.floor(c.thumbs.length / 2)) : undefined;
           out.push({ ...c, durMs: local, version: c.version + 1 });
+          rightTmpId = uid('c-tmp');
+          splitLocalMs = local;
           out.push({
             ...c,
-            id: uid('c'),
-            posMs: atMs,
+            id: rightTmpId,
+            posMs: safeAt,
             durMs: c.durMs - local,
             thumbs: halfThumbs,
             version: 1,
@@ -174,20 +423,56 @@ export const useProjectStore = create<ProjectState>()((set) => ({
           out.push(c);
         }
       }
-      return { clips: out };
-    }),
+      return { ...pushSnapshot(s), clips: out };
+    });
 
-  deleteClips: (clipIds) =>
+    // Persist: backend POST /clips/:id/split expects `split_at_ms` *relative*
+    // to the clip's start (not absolute timeline position). It returns both
+    // halves; the right half is brand new on the server so we swap our
+    // optimistic temp id for its real UUID.
+    if (clipId.startsWith('c-tmp') || !rightTmpId) return;
+    const localRightTmpId: UUID = rightTmpId;
+    void timelineApi
+      .splitClip(clipId, splitLocalMs)
+      .then((pair) => {
+        const rightFromServer = pair.find((p) => p.pos_ms >= safeAt);
+        if (!rightFromServer) return;
+        set((s) => ({
+          clips: s.clips.map((c) =>
+            c.id === localRightTmpId ? { ...c, id: rightFromServer.id } : c,
+          ),
+        }));
+      })
+      .catch((e) => {
+        console.warn('splitClipAt persist failed — rolling back local split:', e);
+        // Pop the snapshot we just pushed so the editor doesn't render two
+        // half-clips that don't exist on the server. The user sees the
+        // original whole clip again + a toast (added in CollabClient layer).
+        useProjectStore.getState().undoLocal();
+      });
+  },
+
+  deleteClips: (clipIds) => {
     set((s) => {
       const drop = new Set(clipIds);
       if (drop.size === 0) return {};
       const nextEffects = { ...s.effects };
       for (const id of drop) delete nextEffects[id];
       return {
+        ...pushSnapshot(s),
         clips: s.clips.filter((c) => !drop.has(c.id)),
         effects: nextEffects,
       };
-    }),
+    });
+    // Fire-and-forget DELETEs in parallel. Temp-id clips don't have a server
+    // row yet (addClip may still be in flight) — skip them.
+    for (const id of clipIds) {
+      if (id.startsWith('c-tmp')) continue;
+      void timelineApi
+        .deleteClip(id)
+        .catch((e) => console.warn(`deleteClip(${id}) persist failed:`, e));
+    }
+  },
 
   addEffect: (clipId, type) =>
     set((s) => {
@@ -195,7 +480,10 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       const value = EFFECT_DEFAULTS[type] ?? meta.min;
       const fx: ClipEffect = { id: uid('fx'), type, enabled: true, value };
       const existing = s.effects[clipId] ?? [];
-      return { effects: { ...s.effects, [clipId]: [...existing, fx] } };
+      return {
+        ...pushSnapshot(s),
+        effects: { ...s.effects, [clipId]: [...existing, fx] },
+      };
     }),
 
   toggleEffect: (clipId, effectId) =>
@@ -203,6 +491,7 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       const list = s.effects[clipId];
       if (!list) return {};
       return {
+        ...pushSnapshot(s),
         effects: {
           ...s.effects,
           [clipId]: list.map((fx) =>
@@ -216,6 +505,10 @@ export const useProjectStore = create<ProjectState>()((set) => ({
     set((s) => {
       const list = s.effects[clipId];
       if (!list) return {};
+      // NB: slider drags fire updateEffect at 60fps. To keep the undo stack
+      // useful (one entry per "interaction" rather than one per frame), we
+      // skip the snapshot here. The trade-off: dragging a slider can't be
+      // undone — but you can toggle the effect off instead.
       return {
         effects: {
           ...s.effects,
@@ -229,7 +522,46 @@ export const useProjectStore = create<ProjectState>()((set) => ({
       const list = s.effects[clipId];
       if (!list) return {};
       return {
+        ...pushSnapshot(s),
         effects: { ...s.effects, [clipId]: list.filter((fx) => fx.id !== effectId) },
+      };
+    }),
+
+  // ── Remote ops (no API roundtrip) ─────────────────────────────────────────
+
+  applyRemoteClipUpsert: (clip) =>
+    set((s) => {
+      const existingIdx = s.clips.findIndex((c) => c.id === clip.id);
+      const next: Clip = {
+        id: clip.id,
+        trackId: clip.track_id,
+        assetId: clip.asset_id ?? '',
+        name: clip.name,
+        posMs: Math.max(0, clip.pos_ms),
+        durMs: Math.max(400, clip.dur_ms),
+        inPointMs: clip.trim_in_ms ?? 0,
+        outPointMs: (clip.trim_in_ms ?? 0) + clip.dur_ms,
+        transform: existingIdx >= 0
+          ? s.clips[existingIdx]!.transform
+          : { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+        thumbs: existingIdx >= 0 ? s.clips[existingIdx]!.thumbs : undefined,
+        version: existingIdx >= 0 ? s.clips[existingIdx]!.version + 1 : 1,
+      };
+      const clips =
+        existingIdx === -1
+          ? [...s.clips, next]
+          : s.clips.map((c, i) => (i === existingIdx ? next : c));
+      return { clips };
+    }),
+
+  applyRemoteClipDelete: (clipId) =>
+    set((s) => {
+      if (!s.clips.some((c) => c.id === clipId)) return {};
+      const nextEffects = { ...s.effects };
+      delete nextEffects[clipId];
+      return {
+        clips: s.clips.filter((c) => c.id !== clipId),
+        effects: nextEffects,
       };
     }),
 }));
@@ -242,8 +574,20 @@ export const useProjectStore = create<ProjectState>()((set) => ({
 export const selectTotalDurationMs = (s: ProjectState): number =>
   s.clips.reduce((m, c) => Math.max(m, c.posMs + c.durMs), 0);
 
+/** True when there's something to undo. Subscribe via `useProjectStore`. */
+export const selectCanUndo = (s: ProjectState): boolean => s._undoStack.length > 0;
+/** True when there's something to redo. Subscribe via `useProjectStore`. */
+export const selectCanRedo = (s: ProjectState): boolean => s._redoStack.length > 0;
+
 export const selectClipById = (id: UUID) => (s: ProjectState): Clip | undefined =>
   s.clips.find((c) => c.id === id);
 
+// React's useSyncExternalStore (used by Zustand) requires the selector to
+// return *stable* references when nothing changed — otherwise it re-renders
+// on every snapshot check and throws "Maximum update depth exceeded".
+// Share a single empty-array constant for the "no effects on this clip"
+// fallback so the reference stays identical across renders.
+const EMPTY_EFFECTS: readonly ClipEffect[] = Object.freeze([]);
+
 export const selectEffectsForClip = (id: UUID) => (s: ProjectState): readonly ClipEffect[] =>
-  s.effects[id] ?? [];
+  s.effects[id] ?? EMPTY_EFFECTS;

@@ -2,7 +2,8 @@ import { LayersIcon, MousePointerIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { PanelHead } from '@/components/shared/PanelHead';
-import { MOCK_ASSET_INDEX } from '@/mocks/cloudcut';
+import { MOCK_ASSET_INDEX as MOCK_ASSET_INDEX_FALLBACK } from '@/mocks/cloudcut';
+import { useAssetsStore } from '@/state/assetsStore';
 import {
   selectClipById,
   useProjectStore,
@@ -11,7 +12,7 @@ import { useUIStore } from '@/state/uiStore';
 import type { InspectorTab } from '@/types';
 
 import { EffectsTab } from './EffectsTab';
-import { PropsTab } from './PropsTab';
+import { ClipInfo } from './ClipInfo';
 
 const TABS: ReadonlyArray<{ id: InspectorTab; label: string; disabled?: boolean }> = [
   { id: 'props',   label: 'Properties' },
@@ -26,15 +27,25 @@ const TABS: ReadonlyArray<{ id: InspectorTab; label: string; disabled?: boolean 
  *   - exactly 1 selected: PropsTab or EffectsTab depending on `inspectorTab`
  */
 export function InspectorPanel() {
+  // ── ALL hooks must run unconditionally on every render — see the React
+  // Rules of Hooks. The previous version called useAssetsStore *after* the
+  // early-return guards, which caused the hook count to differ between
+  // renders and crashed the editor with "Rendered more hooks than during
+  // the previous render" the first time a clip got selected/deselected.
   const selectedIds = useUIStore((s) => s.selectedClipIds);
   const tab = useUIStore((s) => s.inspectorTab);
   const setTab = useUIStore((s) => s.setInspectorTab);
 
-  // selectClipById takes an id at call time; calling it with a fixed id
-  // returns a stable selector function for Zustand's equality check.
   const firstId = selectedIds[0];
   const clip = useProjectStore((s) =>
     firstId ? selectClipById(firstId)(s) : undefined,
+  );
+
+  // Live workspace asset for the selected clip — falls back to the mock index
+  // when running offline (loadMockProject mode). The selector handles
+  // !clip safely so the hook still runs in the empty-selection branch.
+  const liveAsset = useAssetsStore((s) =>
+    clip ? s.byId[clip.assetId] : undefined,
   );
 
   if (selectedIds.length === 0 || !clip) {
@@ -63,7 +74,7 @@ export function InspectorPanel() {
     );
   }
 
-  const asset = MOCK_ASSET_INDEX[clip.assetId];
+  const asset = liveAsset ?? MOCK_ASSET_INDEX_FALLBACK[clip.assetId];
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -92,7 +103,7 @@ export function InspectorPanel() {
         ))}
       </div>
 
-      {tab === 'props' && <PropsTab clip={clip} asset={asset} />}
+      {tab === 'props' && <ClipInfo clip={clip} asset={asset} />}
       {tab === 'effects' && <EffectsTab clip={clip} />}
       {tab === 'audio' && null}
     </div>

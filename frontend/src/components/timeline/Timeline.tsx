@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { MOCK_ASSET_INDEX } from '@/mocks/cloudcut';
+import { MOCK_ASSET_INDEX as MOCK_ASSET_INDEX_FALLBACK } from '@/mocks/cloudcut';
+import { useAssetsStore } from '@/state/assetsStore';
 import { useCollabStore } from '@/state/collabStore';
 import { useHistoryStore } from '@/state/historyStore';
 import { usePlaybackStore } from '@/state/playbackStore';
@@ -13,7 +14,7 @@ import { Playhead } from './Playhead';
 import { TimelineClip } from './TimelineClip';
 import { TimelineRuler } from './TimelineRuler';
 import { TimelineToolbar } from './TimelineToolbar';
-import { TrackHeader } from './TrackHeader';
+import { TimelineTrack } from './TimelineTrack';
 
 const SNAP_THRESHOLD_PX = 14;
 
@@ -32,8 +33,9 @@ export function Timeline() {
   const resizeClip = useProjectStore((s) => s.resizeClip);
   const splitClipAt = useProjectStore((s) => s.splitClipAt);
   const addClip = useProjectStore((s) => s.addClip);
+  const snapshotNow = useProjectStore((s) => s.snapshotNow);
 
-  const visibleTrackIds = useUIStore((s) => s.visibleTrackIds);
+  const trackPreset = useUIStore((s) => s.trackPreset);
   const selectedIds = useUIStore((s) => s.selectedClipIds);
   const selectClip = useUIStore((s) => s.selectClip);
   const zoomLevel = useUIStore((s) => s.zoomLevel);
@@ -61,10 +63,26 @@ export function Timeline() {
   const majorSec = pps >= 80 ? 1 : pps >= 40 ? 2 : 5;
   const rowGridPx = majorSec * pps;
 
-  const visibleTracks = useMemo(
-    () => tracks.filter((t) => visibleTrackIds.includes(t.id)),
-    [tracks, visibleTrackIds],
-  );
+  // Track presets filter by *type*, not by hard-coded ID — so they survive
+  // backend-driven UUIDs. `track.visible` (eye toggle) hides individual rows
+  // on top of that and is handled deeper in the render loop.
+  const visibleTracks = useMemo(() => {
+    switch (trackPreset) {
+      case 'minimal': {
+        const v = tracks.find((t) => t.type === 'video');
+        const a = tracks.find((t) => t.type === 'audio');
+        return [v, a].filter((t): t is Track => Boolean(t));
+      }
+      case 'audio-heavy': {
+        const v = tracks.find((t) => t.type === 'video');
+        const audios = tracks.filter((t) => t.type === 'audio');
+        return [v, ...audios].filter((t): t is Track => Boolean(t));
+      }
+      case 'demo':
+      default:
+        return tracks;
+    }
+  }, [tracks, trackPreset]);
 
   // Horizontal scroll observed by the ruler so its click-to-seek math accounts
   // for the offset; rows + playhead share the same scroll container naturally.
@@ -89,6 +107,9 @@ export function Timeline() {
         splitClipAt(clip.id, t);
         return;
       }
+
+      // Capture pre-drag state once so the whole drag is one undo step.
+      snapshotNow();
 
       const startX = e.clientX;
       const startPos = clip.posMs;
@@ -126,7 +147,7 @@ export function Timeline() {
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [activeTool, clips, moveClip, pms, pushHistory, seek, selectClip, snapEnabled, splitClipAt, zoomLevel],
+    [activeTool, clips, moveClip, pms, pushHistory, seek, selectClip, snapEnabled, snapshotNow, splitClipAt, zoomLevel],
   );
 
   // ── Drag: trim handles ─────────────────────────────────────────────────
@@ -135,6 +156,8 @@ export function Timeline() {
       (e: React.MouseEvent, clip: Clip) => {
         e.preventDefault();
         selectClip(clip.id);
+        // Capture pre-trim state once so the whole trim drag is one undo step.
+        snapshotNow();
         const startX = e.clientX;
         const startPos = clip.posMs;
         const startDur = clip.durMs;
@@ -165,7 +188,7 @@ export function Timeline() {
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
       },
-    [pms, pushHistory, resizeClip, selectClip],
+    [pms, pushHistory, resizeClip, selectClip, snapshotNow],
   );
 
   const onTrimLeftMouseDown = useMemo(() => makeTrimHandler('left'), [makeTrimHandler]);
@@ -176,9 +199,14 @@ export function Timeline() {
     e.preventDefault();
     const assetId = e.dataTransfer.getData('application/x-cloudcut-asset');
     if (!assetId) return;
-    const asset = MOCK_ASSET_INDEX[assetId];
-    if (!asset || asset.durMs == null) return;
-    // Reject incompatible drops: image → audio, audio → video, etc.
+    // Lookup goes through the live store (real assets from the backend) —
+    // the mock index is only seeded when projectStore.loadMockProject() runs.
+    const asset =
+      useAssetsStore.getState().byId[assetId] ?? MOCK_ASSET_INDEX_FALLBACK[assetId];
+    if (!asset) return;
+    // Images don't have a duration — default to 4s on the timeline.
+    const durMs = asset.durMs ?? 4000;
+    // Reject incompatible drops: audio asset → video track, etc.
     const compat =
       (track.type === 'video' && asset.type !== 'audio') ||
       (track.type === 'audio' && asset.type === 'audio');
@@ -193,7 +221,7 @@ export function Timeline() {
       trackId: track.id,
       assetId: asset.id,
       posMs: dropMs,
-      durMs: asset.durMs,
+      durMs,
       name: asset.name,
       thumbs: asset.thumb ? [asset.thumb] : undefined,
     });
@@ -217,7 +245,7 @@ export function Timeline() {
           />
           <div className="flex-1 overflow-hidden">
             {visibleTracks.map((tr) => (
-              <TrackHeader key={tr.id} track={tr} />
+              <TimelineTrack key={tr.id} track={tr} />
             ))}
           </div>
         </div>
@@ -237,7 +265,11 @@ export function Timeline() {
 
               <div className="relative" style={{ ['--major-px' as string]: `${rowGridPx}px` }}>
                 {visibleTracks.map((tr) => {
-                  const trackClips = clips.filter((c) => c.trackId === tr.id);
+                  // Hidden tracks keep their header (eye icon stays clickable)
+                  // but their clips don't render — matches Premiere/Resolve UX.
+                  const trackClips = tr.visible
+                    ? clips.filter((c) => c.trackId === tr.id)
+                    : [];
                   return (
                     <div
                       key={tr.id}

@@ -6,7 +6,7 @@ import type { Asset, Clip } from '@/types';
 
 import { SliderRow } from './SliderRow';
 
-interface PropsTabProps {
+interface ClipInfoProps {
   clip: Clip;
   asset: Asset | undefined;
 }
@@ -16,7 +16,7 @@ interface PropsTabProps {
  * (uncontrolled today; wired to `projectStore.updateClipTransform` in
  * Phase 1.6+ when drag-on-canvas lands).
  */
-export function PropsTab({ clip, asset }: PropsTabProps) {
+export function ClipInfo({ clip, asset }: ClipInfoProps) {
   return (
     <div className="flex-1 overflow-y-auto px-3.5 pb-10 pt-3">
       <Section title="Clip">

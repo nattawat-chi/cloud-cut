@@ -5,7 +5,7 @@ import { useProjectStore } from '@/state/projectStore';
 import { EFFECT_META } from '@/types';
 import type { ClipEffect, UUID } from '@/types';
 
-interface EffectCardProps {
+interface EffectEditorProps {
   clipId: UUID;
   fx: ClipEffect;
 }
@@ -15,7 +15,7 @@ interface EffectCardProps {
  * remove button. All three actions hit the projectStore directly so the
  * player's CSS-filter preview updates immediately.
  */
-export function EffectCard({ clipId, fx }: EffectCardProps) {
+export function EffectEditor({ clipId, fx }: EffectEditorProps) {
   const toggleEffect = useProjectStore((s) => s.toggleEffect);
   const updateEffect = useProjectStore((s) => s.updateEffect);
   const removeEffect = useProjectStore((s) => s.removeEffect);

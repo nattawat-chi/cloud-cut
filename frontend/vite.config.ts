@@ -8,6 +8,10 @@ import tailwindcss from '@tailwindcss/vite';
 // Vite 8 and Vitest 2 in `defineConfig` overloads.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Read .env from the repo root, not frontend/. Same .env file Docker
+  // Compose + the Rust crates use — single source of truth for secrets
+  // (VITE_PUSHER_KEY etc. live there alongside PUSHER_SECRET).
+  envDir: path.resolve(__dirname, '..'),
   resolve: {
     alias: {
       // `@/*` resolves to `src/*` — matches the path alias in tsconfig.app.json
@@ -18,5 +22,13 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // Proxy /api → backend so the frontend can call relative URLs in dev
+    // and avoid CORS preflights. Production deploys both behind one origin.
+    proxy: {
+      '/api': {
+        target: process.env.VITE_API_PROXY ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
+    },
   },
 });

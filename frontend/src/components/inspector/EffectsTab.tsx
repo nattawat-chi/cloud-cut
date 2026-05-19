@@ -9,7 +9,7 @@ import { useUIStore } from '@/state/uiStore';
 import { EFFECT_META } from '@/types';
 import type { Clip, ClipEffect, EffectType } from '@/types';
 
-import { EffectCard } from './EffectCard';
+import { EffectEditor } from './EffectEditor';
 
 interface EffectsTabProps {
   clip: Clip;
@@ -52,7 +52,7 @@ export function EffectsTab({ clip }: EffectsTabProps) {
         </div>
 
         {effects.map((fx) => (
-          <EffectCard key={fx.id} clipId={clip.id} fx={fx} />
+          <EffectEditor key={fx.id} clipId={clip.id} fx={fx} />
         ))}
 
         <details className="group mt-2">

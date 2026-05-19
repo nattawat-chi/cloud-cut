@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { useProjectStore } from '@/state/projectStore';
 import type { Track } from '@/types';
 
-interface TrackHeaderProps {
+interface TimelineTrackProps {
   track: Track;
 }
 
@@ -20,7 +20,7 @@ interface TrackHeaderProps {
  * Color swatch is a 3px vertical strip pulled from the track's CSS var
  * (same accent the clips on that track use).
  */
-export function TrackHeader({ track }: TrackHeaderProps) {
+export function TimelineTrack({ track }: TimelineTrackProps) {
   const toggleTrack = useProjectStore((s) => s.toggleTrack);
 
   return (

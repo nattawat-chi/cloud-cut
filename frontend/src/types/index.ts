@@ -52,6 +52,8 @@ export interface Asset {
   progress: number;
   /** CSS gradient string in mocks; URL in production. */
   thumb?: string;
+  /** Playable proxy URL — `<video src>` for video/audio when status is "ready". */
+  proxyUrl?: string;
 }
 
 // ── Clips ───────────────────────────────────────────────────────────────────

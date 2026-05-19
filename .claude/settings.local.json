@@ -22,7 +22,25 @@
       "Bash(gh --version)",
       "Bash(gh auth *)",
       "Bash(git init *)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "PowerShell($env:PATH += \";$env:USERPROFILE\\\\.cargo\\\\bin\"; cd \"C:\\\\Users\\\\Cobalt\\\\Desktop\\\\new-projects\\\\cloud-cut-readiness-test\"; Write-Output \"=== cargo backend ===\"; cargo build -p backend 2>&1 | Select-Object -Last 5; Write-Output \"\"; cd frontend; Write-Output \"=== pnpm typecheck ===\"; pnpm typecheck 2>&1 | Select-Object -Last 10)",
+      "PowerShell(cd \"C:\\\\Users\\\\Cobalt\\\\Desktop\\\\new-projects\\\\cloud-cut-readiness-test\"; foreach \\($f in @\\(\"docker/postgres/init.sql\", \"backend/migrations/0001_init.sql\", \"backend/migrations/0002_indexes.sql\", \"backend/migrations/0003_seed.sql\"\\)\\) { Write-Output \"=== applying $f ===\"; Get-Content $f -Raw | docker exec -i cloudcut-postgres psql -U cloudcut -d cloudcut 2>&1 | Select-Object -Last 3 })",
+      "PowerShell(docker exec -i cloudcut-postgres psql -U cloudcut -d cloudcut -c \"UPDATE users SET password_hash = '`$argon2id`$v=19`$m=19456,t=2,p=1`$rjiy0AsmSYidiTnvGd77Zw`$9ftmhIrEjSKniTzQC5mXx4h6xtxo09INEhKSn8EsvzE' WHERE email IN \\('alice@cloudcut.dev', 'mira@cloudcut.dev'\\); SELECT email, length\\(password_hash\\) FROM users;\" 2>&1)",
+      "Bash(curl -s http://localhost:8080/api/v1/health)",
+      "Bash(sed -i 's/trim_in_ms, trim_out_ms,\\\\n.*speed, name, version/X/g' backend/src/timeline/handlers.rs)",
+      "Bash(grep -n \"speed, name, version\\\\|speed,$\\\\|ce.value\\\\|, value, enabled\" backend/src/timeline/handlers.rs)",
+      "Bash(docker exec *)",
+      "Bash(./target/debug/backend.exe)",
+      "Bash(./target/debug/worker.exe)",
+      "Bash(tasklist)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/api/v1/health)",
+      "Bash(grep -n \"Source\\\\|asset\\\\b\\\\|assetId\\\\|asset?\\\\\\\\.\" frontend/src/components/inspector/PropsTab.tsx)",
+      "Bash(curl -sI \"http://localhost:9000/cloudcut-assets/variants/7a574691-1ec4-4daa-b3e0-4b0860550d4d/proxy.mp4\")",
+      "Bash(curl -s -r 0-100 \"http://localhost:9000/cloudcut-assets/variants/7a574691-1ec4-4daa-b3e0-4b0860550d4d/proxy.mp4\")",
+      "Bash(xxd)",
+      "Bash(RUST_LOG=\"backend=debug,backend::pusher=debug\" ./target/debug/backend.exe)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5173/api/v1/pusher/auth -X POST)",
+      "Bash(curl -s -X POST http://localhost:8080/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"alice@cloudcut.dev\",\"password\":\"password123\"}')"
     ]
   }
 }

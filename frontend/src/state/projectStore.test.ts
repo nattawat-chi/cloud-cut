@@ -35,7 +35,9 @@ describe('projectStore', () => {
       });
       const after = useProjectStore.getState().clips;
       expect(after).toHaveLength(before + 1);
-      expect(id).toMatch(/^c_/);
+      // Phase 6.6: addClip emits a `c-tmp_*` optimistic id that gets remapped
+      // to the server's UUID once timelineApi.addClip resolves.
+      expect(id).toMatch(/^c[-_]/);
       const created = after.find((c) => c.id === id);
       expect(created?.posMs).toBe(1000);
       expect(created?.durMs).toBe(5000);

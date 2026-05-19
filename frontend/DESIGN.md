@@ -267,5 +267,14 @@ Vitest + jsdom; run with `pnpm test` (watch) or `pnpm test:run` (CI).
 **Rule 10 (testing minimums) satisfied:** timecode util ✓ · snap logic ✓ · "command manager" via projectStore mutations ✓.
 
 **Found while writing tests:** `fmtTC` had a floating-point precision bug at exact frame boundaries (500ms / 30fps returned frame 14 instead of 15 because `500 / (1000/30)` evaluates to 14.999999…). Switched to integer math `(ms * fps) / 1000` — see [G-007 in DEV_LOG](../DEV_LOG.md).
-| 1.8 | ⏳ | Tests, fill remaining gaps, final polish |
-| 5 | ⏳ | Q4 (optimistic update), Q7 (Pusher integration) |
+| 1.8 | ✅ | Tests, fill remaining gaps, final polish |
+| 5 | ✅ | Q7 (Pusher integration) — `services/pusher.ts` + `CollabClient.tsx` |
+
+## Phase 5 — Pusher integration (delivered)
+
+Files added:
+- `src/services/pusher.ts` — singleton `getPusher()`; returns `null` when `VITE_PUSHER_KEY` is missing so dev runs without credentials.
+- `src/components/collaboration/CollabClient.tsx` — subscribes to `presence-project-<id>`, mirrors presence events (`pusher:subscription_succeeded`, `pusher:member_added`, `pusher:member_removed`) into the history toast stream, and applies remote `clip:updated` / `clip:deleted` events to `projectStore` (skipping echoes of the caller's own `actor` id).
+- `App.tsx` swap: `<CollabSimulator />` → `<CollabClient />`. The simulator is now a fallback rendered by `CollabClient` whenever Pusher is disabled, so the scripted "movie" still plays in dev mode.
+
+Backend pair: `backend/src/pusher/` signs presence/private channel subscriptions (`POST /api/v1/pusher/auth`) using HMAC-SHA256 over `socket_id:channel:user_data`, and publishes timeline mutations via the Pusher REST API. Hand-rolled rather than via the (stale) `pusher` crate to stay on async reqwest + share HMAC helpers across binaries.

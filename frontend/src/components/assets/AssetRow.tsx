@@ -1,4 +1,10 @@
+import { useState } from 'react';
+import { Trash2Icon } from 'lucide-react';
+
 import { cn } from '@/lib/utils';
+import { ApiError, assets as assetsApi } from '@/services/api';
+import { useAssetsStore } from '@/state/assetsStore';
+import { useHistoryStore } from '@/state/historyStore';
 import type { Asset } from '@/types';
 import { fmtClipDur } from '@/utils/timecode';
 
@@ -10,24 +16,45 @@ interface AssetRowProps {
 }
 
 /**
- * Single draggable asset card. Drag-to-timeline wiring lands in Phase 1.6
- * (Timeline implements the drop target). For now the `draggable` attribute
- * + dataTransfer payload is set so the browser shows a drag affordance.
+ * Single draggable asset card. Drag-to-timeline payload is consumed by
+ * `Timeline.tsx` (Phase 1.6). The trash icon appears on hover and calls
+ * `DELETE /assets/:id`; the backend rejects with 409 when the asset is still
+ * referenced by any clip, which we surface as a toast.
  */
 export function AssetRow({ asset }: AssetRowProps) {
+  const removeFromStore = useAssetsStore((s) => s.remove);
+  const toast = useHistoryStore((s) => s.toast);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      await assetsApi.delete(asset.id);
+      removeFromStore(asset.id);
+      toast({ who: 'Assets', body: `Deleted ${asset.name}` });
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : (err as Error).message;
+      toast({ who: 'Delete failed', body: msg });
+      setDeleting(false);
+    }
+  };
+
   return (
     <div
       draggable
       onDragStart={(e) => {
-        // Phase 1.6 wires the timeline drop target to read this payload.
         e.dataTransfer.setData('application/x-cloudcut-asset', asset.id);
         e.dataTransfer.effectAllowed = 'copy';
       }}
       className={cn(
-        'mb-0.5 grid cursor-grab grid-cols-[56px_1fr_auto] items-center gap-2.5',
+        'group relative mb-0.5 grid cursor-grab grid-cols-[56px_1fr_auto] items-center gap-2.5',
         'rounded-md border border-transparent p-1.5',
         'hover:border-line-soft hover:bg-surface-2',
         'active:cursor-grabbing',
+        deleting && 'opacity-40',
       )}
     >
       <AssetThumb asset={asset} />
@@ -55,7 +82,23 @@ export function AssetRow({ asset }: AssetRowProps) {
         )}
       </div>
 
-      <AssetStatusPill asset={asset} />
+      <div className="flex items-center gap-1">
+        <AssetStatusPill asset={asset} />
+        <button
+          type="button"
+          title="Delete asset"
+          onClick={handleDelete}
+          disabled={deleting}
+          className={cn(
+            'grid h-6 w-6 place-items-center rounded text-text-4 opacity-0 transition-opacity',
+            'group-hover:opacity-100',
+            'hover:bg-danger/15 hover:text-danger',
+            'disabled:cursor-default',
+          )}
+        >
+          <Trash2Icon size={12} />
+        </button>
+      </div>
     </div>
   );
 }

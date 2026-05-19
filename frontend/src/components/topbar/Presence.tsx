@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/state/authStore';
 import { useCollabStore } from '@/state/collabStore';
-import { YOU } from '@/mocks/cloudcut';
 import type { CursorState, UUID } from '@/types';
 
 /**
@@ -12,10 +12,25 @@ import type { CursorState, UUID } from '@/types';
 export function Presence() {
   const collaborators = useCollabStore((s) => s.collaborators);
   const cursors = useCollabStore((s) => s.cursors);
+  const user = useAuthStore((s) => s.user);
+
+  // The collaborators list from Pusher *includes* the local user; filter
+  // them out so the "You" avatar isn't duplicated.
+  const others = user ? collaborators.filter((c) => c.id !== user.id) : collaborators;
+
+  const youInitials = user
+    ? (user.display_name || user.email)
+        .split(/\s+|@/)
+        .map((p) => p[0])
+        .filter(Boolean)
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : 'YU';
 
   return (
     <div className="flex items-center">
-      {collaborators.map((c, i) => {
+      {others.map((c, i) => {
         const editing = isUserEditing(c.name, cursors);
         return (
           <Avatar
@@ -29,10 +44,10 @@ export function Presence() {
         );
       })}
       <Avatar
-        initials={YOU.initials}
+        initials={youInitials}
         label="You"
         isYou
-        stack={collaborators.length > 0}
+        stack={others.length > 0}
       />
     </div>
   );

@@ -1,6 +1,9 @@
-import { ViewportCursors } from '@/components/collaboration/ViewportCursors';
+import { useEffect, useRef, useState } from 'react';
+
+import { RemoteCursors } from '@/components/collaboration/RemoteCursors';
 import { PanelHead } from '@/components/shared/PanelHead';
 import { usePlaybackTicker } from '@/hooks/usePlaybackTicker';
+import { useAssetsStore } from '@/state/assetsStore';
 import { usePlaybackStore } from '@/state/playbackStore';
 import { useProjectStore } from '@/state/projectStore';
 import { clipAtTime, filterFromEffects } from '@/utils/playback';
@@ -10,25 +13,92 @@ import { MockFrame } from './MockFrame';
 import { PlayerControls } from './PlayerControls';
 
 /**
- * 16:9 stage with overlays + transport. Effects from `projectStore.effects`
- * are composed into a single CSS `filter` string and applied to the stage,
- * so dragging an Inspector slider updates the preview frame in real time.
+ * 16:9 stage with overlays + transport.
+ *
+ * - Looks up the visible clip via `clipAtTime` (V2 over V1, hidden tracks skipped).
+ * - When the underlying asset has a `proxyUrl` (worker generated proxy.mp4),
+ *   renders a real `<video>` element synced to `playbackStore.currentTimeMs`.
+ *   Otherwise falls back to `MockFrame` so the editor still shows *something*
+ *   while the worker is processing an upload.
+ * - CSS filters from enabled effects are applied to the stage div so they
+ *   apply equally to real video and the mock composition.
  */
 export function VideoPlayer() {
   usePlaybackTicker(); // mount-only — drives currentTimeMs when isPlaying.
 
   const clips = useProjectStore((s) => s.clips);
+  const tracks = useProjectStore((s) => s.tracks);
   const effectsMap = useProjectStore((s) => s.effects);
   const project = useProjectStore((s) => s.project);
   const currentTimeMs = usePlaybackStore((s) => s.currentTimeMs);
+  const isPlaying = usePlaybackStore((s) => s.isPlaying);
+  const volume = usePlaybackStore((s) => s.volume);
+  const isMuted = usePlaybackStore((s) => s.isMuted);
 
-  const clip = clipAtTime(clips, currentTimeMs);
+  const assetsById = useAssetsStore((s) => s.byId);
+
+  const clip = clipAtTime(clips, tracks, currentTimeMs);
+  const asset = clip ? assetsById[clip.assetId] : undefined;
+  const proxyUrl = asset?.proxyUrl;
   const effects = clip ? effectsMap[clip.id] ?? [] : [];
   const cssFilter = filterFromEffects(effects);
 
+  // ─── <video> sync ──────────────────────────────────────────────────────────
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Falls back to MockFrame when the proxy can't be loaded (e.g. seeded assets
+  // whose proxy.mp4 files don't yet exist in MinIO, or a transient network
+  // error). Cleared whenever the source URL changes so a different clip gets
+  // a fresh attempt.
+  const [videoError, setVideoError] = useState(false);
+
+  // Reload the element when the source URL changes (clip flip)
+  useEffect(() => {
+    setVideoError(false);
+    const v = videoRef.current;
+    if (!v || !proxyUrl) return;
+    if (v.src !== proxyUrl) v.load();
+  }, [proxyUrl]);
+
+  // Seek the underlying source when the timeline scrubs.
+  // We only force a seek when drift exceeds 250ms to avoid fighting the native
+  // playback clock while `isPlaying` (which would stutter).
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !clip) return;
+    // Convert timeline time → source time:
+    //   delta inside the clip + the clip's in-point offset into the source
+    const clipLocalMs = currentTimeMs - clip.posMs + (clip.inPointMs ?? 0);
+    const targetSec = Math.max(0, clipLocalMs / 1000);
+    if (Math.abs(v.currentTime - targetSec) > 0.25) {
+      v.currentTime = targetSec;
+    }
+  }, [currentTimeMs, clip]);
+
+  // Play / pause sync — driven by the playback store rather than DOM controls.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (isPlaying) {
+      // play() returns a Promise; the first user-gesture call may reject if the
+      // browser autoplay policy hasn't unblocked yet. Failing silently is fine
+      // because the UI ticker keeps advancing currentTimeMs either way.
+      v.play().catch(() => {});
+    } else {
+      v.pause();
+    }
+  }, [isPlaying, proxyUrl]);
+
+  // Volume / mute
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.volume = Math.max(0, Math.min(1, volume));
+    v.muted = isMuted;
+  }, [volume, isMuted]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-surface-0">
-      <ViewportCursors />
+      <RemoteCursors />
       <PanelHead
         title="Preview"
         tools={
@@ -47,7 +117,31 @@ export function VideoPlayer() {
             boxShadow: '0 14px 50px -20px rgba(0,0,0,0.7), 0 0 0 1px var(--line)',
           }}
         >
-          <MockFrame clip={clip} />
+          {proxyUrl && !videoError ? (
+            <video
+              ref={videoRef}
+              src={proxyUrl}
+              className="absolute inset-0 h-full w-full object-contain"
+              playsInline
+              preload="auto"
+              onError={(e) => {
+                // Log the failure and fall back to MockFrame. Common causes:
+                // proxy.mp4 not yet in MinIO (seeded/processing assets),
+                // MinIO 404 returns S3 XML which the media engine rejects as
+                // code=4 (SRC_NOT_SUPPORTED), transient network errors.
+                const v = e.currentTarget;
+                const code = v.error?.code;
+                const msg = v.error?.message ?? 'unknown';
+                // eslint-disable-next-line no-console
+                console.warn(
+                  `<video> failed to load (code=${code}, msg="${msg}") src=${proxyUrl} — falling back to MockFrame`,
+                );
+                setVideoError(true);
+              }}
+            />
+          ) : (
+            <MockFrame clip={clip} />
+          )}
 
           {/* Safe area guide */}
           <div

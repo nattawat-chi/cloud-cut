@@ -1,11 +1,12 @@
 import { FilmIcon, RedoIcon, SparklesIcon, UndoIcon, XIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { useHistoryStore } from '@/state/historyStore';
 import {
   selectCanRedo,
   selectCanUndo,
-  useHistoryStore,
-} from '@/state/historyStore';
+  useProjectStore,
+} from '@/state/projectStore';
 import { useUIStore } from '@/state/uiStore';
 import type { HistoryEntry } from '@/types';
 
@@ -18,8 +19,8 @@ export function HistoryPanel() {
   const toggle = useUIStore((s) => s.toggleHistoryPanel);
   const entries = useHistoryStore((s) => s.entries);
   const cursor = useHistoryStore((s) => s.cursor);
-  const canUndo = useHistoryStore(selectCanUndo);
-  const canRedo = useHistoryStore(selectCanRedo);
+  const canUndo = useProjectStore(selectCanUndo);
+  const canRedo = useProjectStore(selectCanRedo);
   const undo = useHistoryStore((s) => s.undo);
   const redo = useHistoryStore((s) => s.redo);
   const jumpTo = useHistoryStore((s) => s.jumpTo);

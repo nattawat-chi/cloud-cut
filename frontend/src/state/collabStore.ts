@@ -1,12 +1,11 @@
 import { create } from 'zustand';
 
 import type { Collaborator, CursorState, UUID } from '@/types';
-import { MOCK_COLLABORATORS } from '@/mocks/cloudcut';
 
 /* =============================================================================
    collabStore — presence + remote cursors.
-   Phase 1.7 drives this with a scripted simulator (`CollabSimulator`).
-   Phase 5 replaces the simulator with a Pusher subscription.
+   Hydrated by `CollabClient` from Pusher presence events. Stays empty in
+   single-user mode (no Pusher creds, no second collaborator).
    ============================================================================= */
 
 export interface CollabState {
@@ -16,23 +15,34 @@ export interface CollabState {
 
   setCursor: (userId: UUID, patch: Partial<CursorState>) => void;
   setAllVisible: (visible: boolean) => void;
+
+  /** Replace the full member list — called from Pusher subscription_succeeded. */
+  setCollaborators: (members: readonly Collaborator[]) => void;
+  /** Add a single member (member_added event). */
+  addCollaborator: (member: Collaborator) => void;
+  /** Remove a member by id (member_removed event). */
+  removeCollaborator: (userId: UUID) => void;
 }
 
-const INITIAL_CURSORS: Record<UUID, CursorState> = {
-  u_alice: { target: 'viewport', x: 0.65, y: 0.55, visible: true,  label: 'Alice K.', editingClipId: null },
-  u_mira:  { target: 'timeline', timelineMs: 12500, visible: true, label: 'Mira S.',  editingClipId: 'c6' },
-  u_dev:   { target: 'viewport', x: 0.45, y: 0.18, visible: true,  label: 'Devon R.', editingClipId: null },
-};
-
 export const useCollabStore = create<CollabState>()((set) => ({
-  collaborators: MOCK_COLLABORATORS,
-  cursors: INITIAL_CURSORS,
+  collaborators: [],
+  cursors: {},
 
   setCursor: (userId, patch) =>
     set((s) => {
       const existing = s.cursors[userId];
-      if (!existing) return {};
-      return { cursors: { ...s.cursors, [userId]: { ...existing, ...patch } } };
+      const next: CursorState = existing
+        ? { ...existing, ...patch }
+        : {
+            target: patch.target ?? 'viewport',
+            visible: patch.visible ?? true,
+            label: patch.label ?? userId,
+            editingClipId: patch.editingClipId ?? null,
+            x: patch.x,
+            y: patch.y,
+            timelineMs: patch.timelineMs,
+          };
+      return { cursors: { ...s.cursors, [userId]: next } };
     }),
 
   setAllVisible: (visible) =>
@@ -42,5 +52,24 @@ export const useCollabStore = create<CollabState>()((set) => ({
         next[k] = { ...v, visible };
       }
       return { cursors: next };
+    }),
+
+  setCollaborators: (members) => set({ collaborators: members }),
+
+  addCollaborator: (member) =>
+    set((s) =>
+      s.collaborators.some((c) => c.id === member.id)
+        ? {}
+        : { collaborators: [...s.collaborators, member] },
+    ),
+
+  removeCollaborator: (userId) =>
+    set((s) => {
+      const cursors = { ...s.cursors };
+      delete cursors[userId];
+      return {
+        collaborators: s.collaborators.filter((c) => c.id !== userId),
+        cursors,
+      };
     }),
 }));

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Clip, ClipEffect } from '@/types';
+import type { Clip, ClipEffect, Track } from '@/types';
 
 import { clipAtTime, filterFromEffects } from './playback';
 
-function makeClip(overrides: Partial<Clip> & Pick<Clip, 'id' | 'trackId' | 'posMs' | 'durMs'>): Clip {
+function makeClip(
+  overrides: Partial<Clip> & Pick<Clip, 'id' | 'trackId' | 'posMs' | 'durMs'>,
+): Clip {
   return {
     assetId: 'a_x',
     name: 'sample.mp4',
@@ -16,6 +18,26 @@ function makeClip(overrides: Partial<Clip> & Pick<Clip, 'id' | 'trackId' | 'posM
   } as Clip;
 }
 
+function makeTrack(
+  overrides: Partial<Track> & Pick<Track, 'id' | 'type'>,
+): Track {
+  return {
+    label: overrides.id,
+    tag: overrides.id,
+    colorVar: '--clip-v-1',
+    muted: false,
+    locked: false,
+    visible: true,
+    ...overrides,
+  } as Track;
+}
+
+// Tracks listed top→bottom in UI; index higher = composited on top
+const TR_V1 = makeTrack({ id: 'tr_v1', type: 'video' });
+const TR_V2 = makeTrack({ id: 'tr_v2', type: 'video', colorVar: '--clip-v-2' });
+const TR_A1 = makeTrack({ id: 'tr_a1', type: 'audio', colorVar: '--clip-a-1' });
+const TRACKS = [TR_V1, TR_V2, TR_A1] as const;
+
 describe('clipAtTime', () => {
   const v1a = makeClip({ id: 'v1a', trackId: 'tr_v1', posMs: 0,    durMs: 5000 });
   const v1b = makeClip({ id: 'v1b', trackId: 'tr_v1', posMs: 5000, durMs: 5000 });
@@ -23,26 +45,32 @@ describe('clipAtTime', () => {
   const a1  = makeClip({ id: 'a1',  trackId: 'tr_a1', posMs: 0,    durMs: 10_000 });
 
   it('returns the V1 clip when no V2 overlaps', () => {
-    expect(clipAtTime([v1a, v1b, a1], 1000)?.id).toBe('v1a');
-    expect(clipAtTime([v1a, v1b, a1], 5500)?.id).toBe('v1b');
+    expect(clipAtTime([v1a, v1b, a1], TRACKS, 1000)?.id).toBe('v1a');
+    expect(clipAtTime([v1a, v1b, a1], TRACKS, 5500)?.id).toBe('v1b');
   });
 
   it('lets V2 win over V1 during overlap', () => {
     // ms=2500: V2 covers 2000-4000 → wins over V1 at 0-5000
-    expect(clipAtTime([v1a, v2, a1], 2500)?.id).toBe('v2');
+    expect(clipAtTime([v1a, v2, a1], TRACKS, 2500)?.id).toBe('v2');
   });
 
   it('ignores audio tracks (visible-frame query)', () => {
-    expect(clipAtTime([a1], 1000)).toBeUndefined();
+    expect(clipAtTime([a1], TRACKS, 1000)).toBeUndefined();
   });
 
   it('returns undefined for times past all clips', () => {
-    expect(clipAtTime([v1a, v1b], 999_999)).toBeUndefined();
+    expect(clipAtTime([v1a, v1b], TRACKS, 999_999)).toBeUndefined();
   });
 
   it('treats the clip end as exclusive', () => {
     // V1 ends at 5000, V1b starts at 5000 — the later clip should win at 5000
-    expect(clipAtTime([v1a, v1b], 5000)?.id).toBe('v1b');
+    expect(clipAtTime([v1a, v1b], TRACKS, 5000)?.id).toBe('v1b');
+  });
+
+  it('skips tracks with visible=false even if a clip overlaps', () => {
+    const tracksHidden = [TR_V1, { ...TR_V2, visible: false }, TR_A1] as Track[];
+    // V2 is hidden, so V1a should win at ms=2500 (V2 would have overridden)
+    expect(clipAtTime([v1a, v2], tracksHidden, 2500)?.id).toBe('v1a');
   });
 });
 
