@@ -5,6 +5,7 @@
 
 mod assets;
 mod auth;
+mod collaboration;
 mod config;
 mod error;
 mod exports;
@@ -79,7 +80,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(timeline::router())
         .merge(assets::router())
         .merge(exports::router())
-        .merge(pusher::router());
+        .merge(pusher::router())
+        .merge(collaboration::router());
 
     Router::new()
         .nest("/api/v1", api)
