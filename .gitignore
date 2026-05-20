@@ -24,6 +24,10 @@ coverage/
 *.swp
 *.swo
 
+# Claude Code workspace state — local-only (settings, worktree symlinks).
+# Never commit; tooling expects it to live in .git/info/exclude territory.
+.claude/
+
 # ---- OS --------------------------------------------------------------------
 .DS_Store
 Thumbs.db
