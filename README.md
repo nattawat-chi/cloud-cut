@@ -198,11 +198,11 @@ Static reference: [`docs/api-spec.md`](docs/api-spec.md).
 
 Live screenshots of the running editor are in [`docs/screenshots/`](docs/screenshots/).
 
-|                                              |                                        |
-| -------------------------------------------- | -------------------------------------- |
-| Editor (timeline + preview + inspector)      | ![editor](docs/screenshots/editor.png) |
-| Export dialog with live quota                | ![export](docs/screenshots/export.png) |
-| Real-time collaboration (cursors + presence) | ![collab](docs/screenshots/collab.png) |
+|                                              |                                                             |
+| -------------------------------------------- | ----------------------------------------------------------- |
+| Editor (timeline + preview + inspector)      | ![editor](docs/screenshots/cloudcut-screenshot.png)         |
+| Export dialog with live quota                | ![export](<docs/screenshots/cloudcut-screenshot%20(2).png>) |
+| Real-time collaboration (cursors + presence) | ![collab](<docs/screenshots/cloudcut-screenshot%20(5).png>) |
 
 Capture instructions are in [`docs/screenshots/README.md`](docs/screenshots/README.md).
 
