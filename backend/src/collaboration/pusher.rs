@@ -46,7 +46,9 @@ impl PusherClient {
         }))
     }
 
-    pub fn key(&self) -> &str { &self.key }
+    pub fn key(&self) -> &str {
+        &self.key
+    }
 
     // ─── Channel auth (called by POST /pusher/auth) ───────────────────────────
 
@@ -119,12 +121,7 @@ impl PusherClient {
         let url = format!("{base_url}?{query}&auth_signature={signature}");
 
         // Log only non-sensitive metadata — never log the signed URL or signature.
-        tracing::debug!(
-            channel,
-            event,
-            body_len = body.len(),
-            "pusher trigger"
-        );
+        tracing::debug!(channel, event, body_len = body.len(), "pusher trigger");
 
         let resp = self
             .http

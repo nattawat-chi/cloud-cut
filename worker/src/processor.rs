@@ -29,9 +29,7 @@ pub async fn dispatch(
         crate::queue::EXPORT_STREAM => {
             crate::export_pipeline::run(fields, db, config, s3, redis).await
         }
-        crate::queue::ASSET_STREAM => {
-            crate::asset_pipeline::run(fields, db, config, s3).await
-        }
+        crate::queue::ASSET_STREAM => crate::asset_pipeline::run(fields, db, config, s3).await,
         other => Err(WorkerError::Other(format!("unknown stream: {other}"))),
     }
 }

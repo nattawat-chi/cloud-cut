@@ -53,9 +53,7 @@ async fn ensure_groups(ctx: &ConsumerContext) -> Result<(), WorkerError> {
     let mut conn = ctx.redis.get_multiplexed_async_connection().await?;
 
     for stream in [EXPORT_STREAM, ASSET_STREAM] {
-        let result: RedisResult<String> = conn
-            .xgroup_create_mkstream(stream, GROUP, "$")
-            .await;
+        let result: RedisResult<String> = conn.xgroup_create_mkstream(stream, GROUP, "$").await;
         match result {
             Ok(_) => tracing::info!(stream, "consumer group created"),
             Err(e) if e.to_string().contains("BUSYGROUP") => {
@@ -72,12 +70,18 @@ async fn read_and_process(ctx: Arc<ConsumerContext>) -> Result<(), WorkerError> 
 
     // Read up to 10 messages from both streams in one call
     let reply: redis::Value = redis::cmd("XREADGROUP")
-        .arg("GROUP").arg(GROUP).arg(&ctx.consumer_name)
-        .arg("COUNT").arg(10)
-        .arg("BLOCK").arg(BLOCK_MS)
+        .arg("GROUP")
+        .arg(GROUP)
+        .arg(&ctx.consumer_name)
+        .arg("COUNT")
+        .arg(10)
+        .arg("BLOCK")
+        .arg(BLOCK_MS)
         .arg("STREAMS")
-        .arg(EXPORT_STREAM).arg(ASSET_STREAM)
-        .arg(">").arg(">")
+        .arg(EXPORT_STREAM)
+        .arg(ASSET_STREAM)
+        .arg(">")
+        .arg(">")
         .query_async(&mut conn)
         .await?;
 
@@ -89,7 +93,16 @@ async fn read_and_process(ctx: Arc<ConsumerContext>) -> Result<(), WorkerError> 
         let msg_id2 = msg_id.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = processor::dispatch(&stream2, &fields, &ctx2.db, &ctx2.config, &ctx2.s3, &ctx2.redis).await {
+            if let Err(e) = processor::dispatch(
+                &stream2,
+                &fields,
+                &ctx2.db,
+                &ctx2.config,
+                &ctx2.s3,
+                &ctx2.redis,
+            )
+            .await
+            {
                 tracing::error!(stream=%stream2, msg_id=%msg_id2, error=%e, "job failed");
                 let _ = maybe_dead_letter(&ctx2, &stream2, &msg_id2, &e).await;
             } else {
@@ -112,7 +125,11 @@ async fn maybe_dead_letter(
     let mut conn = ctx.redis.get_multiplexed_async_connection().await?;
 
     let pending: redis::Value = redis::cmd("XPENDING")
-        .arg(stream).arg(GROUP).arg(msg_id).arg(msg_id).arg(1)
+        .arg(stream)
+        .arg(GROUP)
+        .arg(msg_id)
+        .arg(msg_id)
+        .arg(1)
         .query_async(&mut conn)
         .await
         .unwrap_or(redis::Value::Nil);
@@ -150,7 +167,9 @@ fn parse_xreadgroup_reply(reply: redis::Value) -> Vec<(String, String, processor
             redis::Value::Array(v) => v,
             _ => continue,
         };
-        if stream_pair.len() < 2 { continue; }
+        if stream_pair.len() < 2 {
+            continue;
+        }
 
         let stream_name = match &stream_pair[0] {
             redis::Value::BulkString(b) => String::from_utf8_lossy(b).to_string(),
@@ -167,7 +186,9 @@ fn parse_xreadgroup_reply(reply: redis::Value) -> Vec<(String, String, processor
                 redis::Value::Array(v) => v,
                 _ => continue,
             };
-            if msg_parts.len() < 2 { continue; }
+            if msg_parts.len() < 2 {
+                continue;
+            }
 
             let msg_id = match &msg_parts[0] {
                 redis::Value::BulkString(b) => String::from_utf8_lossy(b).to_string(),
@@ -181,7 +202,9 @@ fn parse_xreadgroup_reply(reply: redis::Value) -> Vec<(String, String, processor
 
             let mut fields = std::collections::HashMap::new();
             for kv in field_list.chunks(2) {
-                if kv.len() < 2 { continue; }
+                if kv.len() < 2 {
+                    continue;
+                }
                 let k = match &kv[0] {
                     redis::Value::BulkString(b) => String::from_utf8_lossy(b).to_string(),
                     _ => continue,

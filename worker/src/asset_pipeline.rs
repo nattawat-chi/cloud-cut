@@ -46,24 +46,30 @@ pub async fn run(
     // ── 3. Probe metadata ───────────────────────────────────────────────────
     let probe = ffmpeg::probe(&original).await?;
 
-    sqlx::query(
-        "UPDATE assets SET duration_ms=$1, width=$2, height=$3, size_bytes=$4 WHERE id=$5",
-    )
-    .bind(probe.duration_ms)
-    .bind(probe.width)
-    .bind(probe.height)
-    .bind(probe.size_bytes)
-    .bind(asset_id)
-    .execute(db)
-    .await?;
+    sqlx::query("UPDATE assets SET duration_ms=$1, width=$2, height=$3, size_bytes=$4 WHERE id=$5")
+        .bind(probe.duration_ms)
+        .bind(probe.width)
+        .bind(probe.height)
+        .bind(probe.size_bytes)
+        .bind(asset_id)
+        .execute(db)
+        .await?;
 
     let asset_id_str = asset_id.to_string();
 
     // ── 4. Generate variants based on kind ──────────────────────────────────
     match kind.as_str() {
         "video" => {
-            process_video(&original, &asset_id_str, &probe, db, config, s3_client, tmp.path())
-                .await?;
+            process_video(
+                &original,
+                &asset_id_str,
+                &probe,
+                db,
+                config,
+                s3_client,
+                tmp.path(),
+            )
+            .await?;
         }
         "audio" => {
             process_audio(&original, &asset_id_str, db, config, s3_client, tmp.path()).await?;
@@ -72,8 +78,14 @@ pub async fn run(
             let thumb_path = tmp.path().join("thumbnail.jpg");
             ffmpeg::make_thumbnail(&original, &thumb_path, 0.0).await?;
             let key = format!("variants/{asset_id_str}/thumbnail.jpg");
-            storage::upload_file(s3_client, &config.s3_bucket, &key, &thumb_path, "image/jpeg")
-                .await?;
+            storage::upload_file(
+                s3_client,
+                &config.s3_bucket,
+                &key,
+                &thumb_path,
+                "image/jpeg",
+            )
+            .await?;
             upsert_variant(db, asset_id, "thumbnail", &key, "image/jpeg", &thumb_path).await?;
         }
         _ => {
@@ -104,42 +116,74 @@ async fn process_video(
 
     let proxy_path = tmp.join("proxy.mp4");
     let db_clone = db.clone();
-    ffmpeg::make_proxy(
-        original,
-        &proxy_path,
-        probe.duration_ms,
-        move |pct| {
-            let db = db_clone.clone();
-            async move {
-                let _ = sqlx::query("UPDATE assets SET progress_pct = $1 WHERE id = $2")
-                    .bind(pct)
-                    .bind(asset_id)
-                    .execute(&db)
-                    .await;
-            }
-        },
-    )
+    ffmpeg::make_proxy(original, &proxy_path, probe.duration_ms, move |pct| {
+        let db = db_clone.clone();
+        async move {
+            let _ = sqlx::query("UPDATE assets SET progress_pct = $1 WHERE id = $2")
+                .bind(pct)
+                .bind(asset_id)
+                .execute(&db)
+                .await;
+        }
+    })
     .await?;
     let proxy_key = format!("variants/{asset_id_str}/proxy.mp4");
-    storage::upload_file(s3_client, &config.s3_bucket, &proxy_key, &proxy_path, "video/mp4").await?;
+    storage::upload_file(
+        s3_client,
+        &config.s3_bucket,
+        &proxy_key,
+        &proxy_path,
+        "video/mp4",
+    )
+    .await?;
     upsert_variant(db, asset_id, "proxy", &proxy_key, "video/mp4", &proxy_path).await?;
 
-    let thumb_offset = probe.duration_ms
+    let thumb_offset = probe
+        .duration_ms
         .map(|d| (d as f64 / 2000.0).min(1.0))
         .unwrap_or(1.0);
     let thumb_path: PathBuf = tmp.join("thumbnail.jpg");
     ffmpeg::make_thumbnail(original, &thumb_path, thumb_offset).await?;
     let thumb_key = format!("variants/{asset_id_str}/thumbnail.jpg");
-    storage::upload_file(s3_client, &config.s3_bucket, &thumb_key, &thumb_path, "image/jpeg").await?;
-    upsert_variant(db, asset_id, "thumbnail", &thumb_key, "image/jpeg", &thumb_path).await?;
+    storage::upload_file(
+        s3_client,
+        &config.s3_bucket,
+        &thumb_key,
+        &thumb_path,
+        "image/jpeg",
+    )
+    .await?;
+    upsert_variant(
+        db,
+        asset_id,
+        "thumbnail",
+        &thumb_key,
+        "image/jpeg",
+        &thumb_path,
+    )
+    .await?;
 
     if probe.has_audio {
         let waveform_path = tmp.join("waveform.json");
         ffmpeg::make_waveform(original, &waveform_path).await?;
         let wf_key = format!("variants/{asset_id_str}/waveform.json");
-        storage::upload_file(s3_client, &config.s3_bucket, &wf_key, &waveform_path, "application/json")
-            .await?;
-        upsert_variant(db, asset_id, "waveform", &wf_key, "application/json", &waveform_path).await?;
+        storage::upload_file(
+            s3_client,
+            &config.s3_bucket,
+            &wf_key,
+            &waveform_path,
+            "application/json",
+        )
+        .await?;
+        upsert_variant(
+            db,
+            asset_id,
+            "waveform",
+            &wf_key,
+            "application/json",
+            &waveform_path,
+        )
+        .await?;
     }
 
     Ok(())
@@ -161,15 +205,36 @@ async fn process_audio(
     let proxy_path = tmp.join("proxy.mp4");
     ffmpeg::make_audio_proxy(original, &proxy_path).await?;
     let proxy_key = format!("variants/{asset_id_str}/proxy.mp4");
-    storage::upload_file(s3_client, &config.s3_bucket, &proxy_key, &proxy_path, "audio/mp4").await?;
+    storage::upload_file(
+        s3_client,
+        &config.s3_bucket,
+        &proxy_key,
+        &proxy_path,
+        "audio/mp4",
+    )
+    .await?;
     upsert_variant(db, asset_id, "proxy", &proxy_key, "audio/mp4", &proxy_path).await?;
 
     let waveform_path = tmp.join("waveform.json");
     ffmpeg::make_waveform(original, &waveform_path).await?;
     let wf_key = format!("variants/{asset_id_str}/waveform.json");
-    storage::upload_file(s3_client, &config.s3_bucket, &wf_key, &waveform_path, "application/json")
-        .await?;
-    upsert_variant(db, asset_id, "waveform", &wf_key, "application/json", &waveform_path).await?;
+    storage::upload_file(
+        s3_client,
+        &config.s3_bucket,
+        &wf_key,
+        &waveform_path,
+        "application/json",
+    )
+    .await?;
+    upsert_variant(
+        db,
+        asset_id,
+        "waveform",
+        &wf_key,
+        "application/json",
+        &waveform_path,
+    )
+    .await?;
 
     Ok(())
 }

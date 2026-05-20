@@ -2,9 +2,7 @@ use axum::{extract::State, Form, Json};
 use serde::Deserialize;
 
 use crate::{
-    auth::extractor::AuthUser,
-    collaboration::pusher::AuthResponse,
-    error::AppError,
+    auth::extractor::AuthUser, collaboration::pusher::AuthResponse, error::AppError,
     state::AppState,
 };
 
@@ -31,14 +29,12 @@ pub async fn channel_auth(
         .ok_or_else(|| AppError::BadRequest("pusher not configured".into()))?;
 
     if form.channel_name.starts_with("presence-") {
-        let row: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT display_name, avatar_url FROM users WHERE id = $1",
-        )
-        .bind(auth.user_id)
-        .fetch_optional(&state.db)
-        .await?;
-        let (display_name, avatar_url) =
-            row.unwrap_or_else(|| ("Anonymous".to_owned(), None));
+        let row: Option<(String, Option<String>)> =
+            sqlx::query_as("SELECT display_name, avatar_url FROM users WHERE id = $1")
+                .bind(auth.user_id)
+                .fetch_optional(&state.db)
+                .await?;
+        let (display_name, avatar_url) = row.unwrap_or_else(|| ("Anonymous".to_owned(), None));
 
         let user_data = serde_json::json!({
             "user_id": auth.user_id.to_string(),
@@ -54,7 +50,9 @@ pub async fn channel_auth(
             &user_data,
         )?))
     } else if form.channel_name.starts_with("private-") {
-        Ok(Json(pusher.sign_private(&form.socket_id, &form.channel_name)))
+        Ok(Json(
+            pusher.sign_private(&form.socket_id, &form.channel_name),
+        ))
     } else {
         Err(AppError::BadRequest(
             "channel must start with presence- or private-".into(),

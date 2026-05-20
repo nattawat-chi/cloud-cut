@@ -6,7 +6,10 @@ pub mod presence;
 pub mod pusher;
 pub mod sync;
 
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use uuid::Uuid;
 
 use crate::state::AppState;

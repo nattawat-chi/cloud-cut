@@ -66,7 +66,8 @@ pub async fn create_export(
     Path(project_id): Path<Uuid>,
     Json(req): Json<CreateExportReq>,
 ) -> Result<(StatusCode, Json<ExportJobCreated>), AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     let format = req.format.as_deref().unwrap_or("mp4");
     let resolution = req.resolution.as_deref().unwrap_or("1080");
@@ -199,10 +200,7 @@ pub async fn list_exports(
 
 /// Push a message to the Redis Stream `cloudcut:exports`.
 /// The worker reads from this stream via `XREADGROUP`.
-async fn enqueue_export(
-    state: &AppState,
-    job: &ExportJobRow,
-) -> Result<String, AppError> {
+async fn enqueue_export(state: &AppState, job: &ExportJobRow) -> Result<String, AppError> {
     let mut conn = state
         .redis
         .get_multiplexed_async_connection()

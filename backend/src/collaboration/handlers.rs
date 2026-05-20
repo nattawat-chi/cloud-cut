@@ -68,10 +68,10 @@ pub async fn list_operations(
     .fetch_all(&state.db)
     .await?;
 
-    let next_seq = operations
-        .last()
-        .map(|op| op.seq)
-        .unwrap_or(q.after_seq);
+    let next_seq = operations.last().map(|op| op.seq).unwrap_or(q.after_seq);
 
-    Ok(Json(OperationsResponse { operations, next_seq }))
+    Ok(Json(OperationsResponse {
+        operations,
+        next_seq,
+    }))
 }

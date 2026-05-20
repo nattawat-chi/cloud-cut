@@ -14,9 +14,15 @@ pub async fn purge_old_temp_files(max_age_secs: u64) -> Result<usize, WorkerErro
     let mut entries = tokio::fs::read_dir(&tmp).await.map_err(WorkerError::Io)?;
 
     while let Ok(Some(entry)) = entries.next_entry().await {
-        let Ok(meta) = entry.metadata().await else { continue };
-        if !meta.is_file() { continue; }
-        let Ok(modified) = meta.modified() else { continue };
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         if modified < cutoff {
             if tokio::fs::remove_file(entry.path()).await.is_ok() {
                 removed += 1;

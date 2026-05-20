@@ -28,28 +28,27 @@ const EXPORT_TTL_SECS: i64 = 86_400;
 
 fn upload_limit(plan: &str) -> i64 {
     match plan {
-        "pro"  => 50,
+        "pro" => 50,
         "team" => 200,
-        _      => 5,   // free / unknown
+        _ => 5, // free / unknown
     }
 }
 
 fn export_concurrent_limit(plan: &str) -> i64 {
     match plan {
-        "pro"  => 10,
+        "pro" => 10,
         "team" => 30,
-        _      => 2,
+        _ => 2,
     }
 }
 
 /// Look up the workspace's plan tier so the right limit applies.
 async fn fetch_plan(state: &AppState, workspace_id: Uuid) -> Result<String, AppError> {
-    let plan: Option<String> = sqlx::query_scalar(
-        "SELECT plan::text FROM workspaces WHERE id = $1",
-    )
-    .bind(workspace_id)
-    .fetch_optional(&state.db)
-    .await?;
+    let plan: Option<String> =
+        sqlx::query_scalar("SELECT plan::text FROM workspaces WHERE id = $1")
+            .bind(workspace_id)
+            .fetch_optional(&state.db)
+            .await?;
     Ok(plan.unwrap_or_else(|| "free".into()))
 }
 
@@ -159,7 +158,7 @@ pub async fn check_upload(state: &AppState, workspace_id: Uuid) -> Result<(), Ap
 /// worker is responsible for calling [`release_export_slot`] when the job
 /// reaches a terminal state.
 pub async fn check_concurrent_exports(
-    state:        &AppState,
+    state: &AppState,
     workspace_id: Uuid,
 ) -> Result<(), AppError> {
     let plan = fetch_plan(state, workspace_id).await?;
@@ -199,15 +198,10 @@ pub async fn release_export_slot(state: &AppState, workspace_id: Uuid) {
 
 /// Look up the workspace_id for a project so handlers that only have a
 /// project_id (like `create_export`) can run the workspace-keyed check.
-pub async fn workspace_for_project(
-    state:      &AppState,
-    project_id: Uuid,
-) -> Result<Uuid, AppError> {
-    let ws: Option<Uuid> = sqlx::query_scalar(
-        "SELECT workspace_id FROM projects WHERE id = $1",
-    )
-    .bind(project_id)
-    .fetch_optional(&state.db)
-    .await?;
+pub async fn workspace_for_project(state: &AppState, project_id: Uuid) -> Result<Uuid, AppError> {
+    let ws: Option<Uuid> = sqlx::query_scalar("SELECT workspace_id FROM projects WHERE id = $1")
+        .bind(project_id)
+        .fetch_optional(&state.db)
+        .await?;
     ws.ok_or_else(|| AppError::NotFound("project".into()))
 }

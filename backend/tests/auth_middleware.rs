@@ -46,7 +46,12 @@ fn make_token_with_exp(exp: usize) -> String {
         exp,
         iat: unix_now(),
     };
-    encode(&Header::default(), &claims, &EncodingKey::from_secret(SECRET.as_bytes())).unwrap()
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(SECRET.as_bytes()),
+    )
+    .unwrap()
 }
 
 fn valid_token() -> String {
@@ -85,7 +90,13 @@ async fn jwt_guard(req: Request<Body>, next: Next) -> Response {
 
     let token = match bearer {
         Some(t) => t.to_owned(),
-        None => return (StatusCode::UNAUTHORIZED, "missing or invalid Authorization header").into_response(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                "missing or invalid Authorization header",
+            )
+                .into_response()
+        }
     };
 
     match decode::<Claims>(
@@ -173,10 +184,7 @@ async fn expired_token_returns_401() {
         .oneshot(
             Request::builder()
                 .uri("/me")
-                .header(
-                    header::AUTHORIZATION,
-                    format!("Bearer {}", expired_token()),
-                )
+                .header(header::AUTHORIZATION, format!("Bearer {}", expired_token()))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -192,10 +200,7 @@ async fn valid_token_returns_200() {
         .oneshot(
             Request::builder()
                 .uri("/me")
-                .header(
-                    header::AUTHORIZATION,
-                    format!("Bearer {}", valid_token()),
-                )
+                .header(header::AUTHORIZATION, format!("Bearer {}", valid_token()))
                 .body(Body::empty())
                 .unwrap(),
         )

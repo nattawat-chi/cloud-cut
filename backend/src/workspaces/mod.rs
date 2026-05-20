@@ -131,7 +131,8 @@ pub async fn create_workspace(
     auth: AuthUser,
     Json(req): Json<CreateWorkspaceReq>,
 ) -> Result<(StatusCode, Json<WorkspaceDetail>), AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     let mut tx = state.db.begin().await?;
 
@@ -255,7 +256,8 @@ pub async fn invite_member(
     Path(workspace_id): Path<Uuid>,
     Json(req): Json<InviteMemberReq>,
 ) -> Result<StatusCode, AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
     require_workspace_role(&state, workspace_id, auth.user_id, Role::Admin).await?;
 
     // owner role cannot be assigned via invite
@@ -320,7 +322,9 @@ pub async fn update_member_role(
         return Err(AppError::Forbidden);
     }
     if req.role == "owner" {
-        return Err(AppError::BadRequest("cannot promote to owner via this endpoint".into()));
+        return Err(AppError::BadRequest(
+            "cannot promote to owner via this endpoint".into(),
+        ));
     }
 
     let role_cast = validate_role_str(&req.role)?;
@@ -379,13 +383,11 @@ pub async fn remove_member(
         _ => {}
     }
 
-    sqlx::query(
-        "DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
-    )
-    .bind(workspace_id)
-    .bind(target_user_id)
-    .execute(&state.db)
-    .await?;
+    sqlx::query("DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2")
+        .bind(workspace_id)
+        .bind(target_user_id)
+        .execute(&state.db)
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
