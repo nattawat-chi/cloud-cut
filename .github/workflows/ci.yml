@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Rust: backend + worker ──────────────────────────────────────────────────
+  rust:
+    name: Rust (build + test)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cloudcut
+          POSTGRES_PASSWORD: cloudcut_dev
+          POSTGRES_DB: cloudcut_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://cloudcut:cloudcut_dev@localhost:5432/cloudcut_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci_test_jwt_secret_at_least_32_bytes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo registry + build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres
+
+      - name: Run migrations
+        run: sqlx migrate run --source backend/migrations
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (warnings as errors)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build (backend + worker)
+        run: cargo build --all
+
+      - name: Test — backend integration tests
+        run: cargo test -p backend --test auth_middleware --test permission --test api_tests
+
+      - name: Test — worker unit tests
+        run: cargo test -p worker
+
+  # ── Frontend: TypeScript + Vitest ──────────────────────────────────────────
+  frontend:
+    name: Frontend (type-check + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm exec tsc --noEmit
+
+      - name: Run Vitest
+        run: pnpm exec vitest run --reporter=verbose
