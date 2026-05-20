@@ -606,16 +606,45 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
         // violation" message), leaving the local state out of sync with
         // the database.
         if (c.id === clipId && local >= 400 && local <= c.durMs - 400) {
-          const halfThumbs = c.thumbs ? c.thumbs.slice(Math.floor(c.thumbs.length / 2)) : undefined;
-          out.push({ ...c, durMs: local, version: c.version + 1 });
+          // Split the source-time window across the two halves. Without this,
+          // the right clip would inherit `inPointMs` from `...c` and replay
+          // the *same* source range the left clip just covered (user-visible
+          // bug: dropping a 1-minute song and splitting at 30s made both
+          // halves play 0:00–0:30 instead of 0:00–0:30 + 0:30–1:00).
+          const leftInPoint = c.inPointMs ?? 0;
+          const rightInPoint = leftInPoint + local;
+          const rightDur = c.durMs - local;
+
+          // Thumbs are a fixed-length filmstrip preview — slice across the
+          // split so each half shows only its own frames.
+          const splitIdx = c.thumbs ? Math.floor(c.thumbs.length / 2) : 0;
+          const leftThumbs = c.thumbs ? c.thumbs.slice(0, splitIdx) : undefined;
+          const rightThumbs = c.thumbs ? c.thumbs.slice(splitIdx) : undefined;
+
+          // Left half — same in-point, shorter duration. `outPointMs` is
+          // metadata only (playback uses `inPointMs + (currentTimeMs - posMs)`)
+          // but we keep it consistent so the Inspector "Out" field matches.
+          out.push({
+            ...c,
+            durMs: local,
+            outPointMs: leftInPoint + local,
+            thumbs: leftThumbs,
+            version: c.version + 1,
+          });
+
           rightTmpId = uid('c-tmp');
           splitLocalMs = local;
+
+          // Right half — in-point advanced by `local`, duration shrunk by the
+          // same amount. This is the actual fix for the playback bug.
           out.push({
             ...c,
             id: rightTmpId,
             posMs: safeAt,
-            durMs: c.durMs - local,
-            thumbs: halfThumbs,
+            durMs: rightDur,
+            inPointMs: rightInPoint,
+            outPointMs: rightInPoint + rightDur,
+            thumbs: rightThumbs,
             version: 1,
           });
         } else {
@@ -636,9 +665,22 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       .then((pair) => {
         const rightFromServer = pair.find((p) => p.pos_ms >= safeAt);
         if (!rightFromServer) return;
+        // Sync inPointMs/outPointMs from the server too, not just the ID —
+        // otherwise a server-side rounding mismatch could leave the right
+        // clip with a stale source-window after the temp-id swap.
+        const serverInPoint = rightFromServer.trim_in_ms ?? 0;
+        const serverDur = rightFromServer.dur_ms;
         set((s) => ({
           clips: s.clips.map((c) =>
-            c.id === localRightTmpId ? { ...c, id: rightFromServer.id } : c,
+            c.id === localRightTmpId
+              ? {
+                  ...c,
+                  id: rightFromServer.id,
+                  inPointMs: serverInPoint,
+                  outPointMs: serverInPoint + serverDur,
+                  durMs: serverDur,
+                }
+              : c,
           ),
         }));
       })
