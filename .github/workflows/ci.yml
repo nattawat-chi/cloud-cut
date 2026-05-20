@@ -60,6 +60,20 @@ jobs:
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
 
+      # GitHub Actions service containers don't mount our docker/postgres/init.sql,
+      # so we install the extensions explicitly here. Keep in sync with that file —
+      # `pgcrypto` for gen_random_uuid(), `uuid-ossp` legacy fallback, `citext`
+      # for users.email case-insensitive uniqueness.
+      - name: Install Postgres extensions
+        env:
+          PGPASSWORD: cloudcut_dev
+        run: |
+          psql -h localhost -U cloudcut -d cloudcut_test -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            CREATE EXTENSION IF NOT EXISTS "citext";
+          SQL
+
       - name: Run migrations
         run: sqlx migrate run --source backend/migrations
 
