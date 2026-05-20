@@ -22,7 +22,6 @@ use crate::{
 
 // ─── GET /api/v1/projects/:id/timeline ────────────────────────────────────────
 /// Bulk-load everything needed to render the timeline in one request.
-
 pub async fn get_timeline(
     State(state): State<AppState>,
     auth: AuthUser,

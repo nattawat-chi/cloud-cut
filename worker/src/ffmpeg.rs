@@ -337,7 +337,7 @@ where
         let af = if clip.has_audio {
             format!(
                 "[{i}:a]atrim={trim_start:.3}:{trim_end:.3},asetpts=PTS-STARTPTS,atempo={speed:.4}[a{i}];",
-                speed = clip.speed.max(0.5).min(2.0), // atempo only accepts 0.5..2.0
+                speed = clip.speed.clamp(0.5, 2.0), // atempo only accepts 0.5..2.0
             )
         } else {
             // Source clip has no audio (e.g. silent screen recording). Generate
@@ -371,7 +371,7 @@ where
 
         // adelay needs one value per channel — we standardise on stereo so
         // pass `delay|delay`. atempo clamp matches the video-track audio path.
-        let speed = aclip.speed.max(0.5).min(2.0);
+        let speed = aclip.speed.clamp(0.5, 2.0);
         let af = format!(
             "[{input_idx}:a]atrim={trim_start:.3}:{trim_end:.3},asetpts=PTS-STARTPTS,atempo={speed:.4},adelay={delay}|{delay}[aa{j}];",
         );

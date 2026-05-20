@@ -23,10 +23,8 @@ pub async fn purge_old_temp_files(max_age_secs: u64) -> Result<usize, WorkerErro
         let Ok(modified) = meta.modified() else {
             continue;
         };
-        if modified < cutoff {
-            if tokio::fs::remove_file(entry.path()).await.is_ok() {
-                removed += 1;
-            }
+        if modified < cutoff && tokio::fs::remove_file(entry.path()).await.is_ok() {
+            removed += 1;
         }
     }
 
