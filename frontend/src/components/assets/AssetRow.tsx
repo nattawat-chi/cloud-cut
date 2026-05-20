@@ -6,6 +6,7 @@ import { ApiError, assets as assetsApi, timeline as timelineApi } from '@/servic
 import { useAssetsStore } from '@/state/assetsStore';
 import { useHistoryStore } from '@/state/historyStore';
 import { useProjectStore } from '@/state/projectStore';
+import { useUIStore } from '@/state/uiStore';
 import type { Asset } from '@/types';
 import { fmtClipDur } from '@/utils/timecode';
 
@@ -61,10 +62,13 @@ export function AssetRow({ asset }: AssetRowProps) {
         await Promise.all(
           realIds.map((id) => timelineApi.deleteClip(id).catch(() => null)),
         );
-        // Local mirror — removes clips, cleans up effects, deselects.
-        // The action also fires its own (now redundant) DELETEs; those just
-        // 404 silently which is fine.
-        useProjectStore.getState().deleteClips(linkedClipIds);
+        // Local-only cleanup: `applyRemoteClipDelete` was designed for Pusher
+        // events ("server already deleted, just update UI") which is exactly
+        // our situation here. Using `deleteClips` instead would fire a *second*
+        // round of timelineApi.deleteClip → 404 → console warnings.
+        const project = useProjectStore.getState();
+        for (const id of linkedClipIds) project.applyRemoteClipDelete(id);
+        useUIStore.getState().deselectAll();
       }
 
       await assetsApi.delete(asset.id);
