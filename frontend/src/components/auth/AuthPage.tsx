@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState } from "react";
 
-import { useAuthStore } from '@/state/authStore';
+import { useAuthStore } from "@/state/authStore";
 
-type Mode = 'login' | 'register';
+type Mode = "login" | "register";
 
 /**
  * Login + Register page. Rendered when no JWT is in `authStore`.
@@ -10,10 +10,10 @@ type Mode = 'login' | 'register';
  * `selectIsAuthenticated`).
  */
 export function AuthPage(): React.ReactElement {
-  const [mode, setMode] = useState<Mode>('login');
-  const [email, setEmail] = useState('alice@cloudcut.dev');
-  const [password, setPassword] = useState('password123');
-  const [displayName, setDisplayName] = useState('');
+  const [mode, setMode] = useState<Mode>("login");
+  const [email, setEmail] = useState("alice@cloudcut.dev");
+  const [password, setPassword] = useState("password123");
+  const [displayName, setDisplayName] = useState("");
 
   const loading = useAuthStore((s) => s.loading);
   const error = useAuthStore((s) => s.error);
@@ -23,8 +23,8 @@ export function AuthPage(): React.ReactElement {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (mode === 'login') await login(email, password);
-      else await register(email, password, displayName || email.split('@')[0]!);
+      if (mode === "login") await login(email, password);
+      else await register(email, password, displayName || email.split("@")[0]!);
     } catch {
       // authStore captured the message into `error` already
     }
@@ -35,28 +35,32 @@ export function AuthPage(): React.ReactElement {
       <div className="w-full max-w-sm rounded-lg border border-surface-3 bg-surface-1 p-6 shadow-xl">
         {/* Brand */}
         <div className="flex items-center gap-2 mb-6">
-          <div className="size-7 rounded-md bg-accent-1 grid place-items-center text-surface-0 font-bold">
+          <div className="size-7 rounded-md bg-primary grid place-items-center text-surface-0 font-bold">
             ☁
           </div>
           <h1 className="text-lg font-semibold tracking-tight">CloudCut</h1>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-5 p-1 rounded-md bg-surface-2">
+        <div className="flex gap-1 mb-5 p-1 rounded-md bg-surface-2 ">
           <button
             type="button"
-            onClick={() => setMode('login')}
-            className={`flex-1 text-sm py-1.5 rounded ${
-              mode === 'login' ? 'bg-surface-1 text-text-1' : 'text-text-3 hover:text-text-2'
+            onClick={() => setMode("login")}
+            className={`cursor-pointer flex-1 text-sm py-1.5 rounded ${
+              mode === "login"
+                ? "bg-surface-1 text-text-1"
+                : "text-text-3 hover:text-text-2"
             }`}
           >
             Login
           </button>
           <button
             type="button"
-            onClick={() => setMode('register')}
-            className={`flex-1 text-sm py-1.5 rounded ${
-              mode === 'register' ? 'bg-surface-1 text-text-1' : 'text-text-3 hover:text-text-2'
+            onClick={() => setMode("register")}
+            className={`cursor-pointer flex-1 text-sm py-1.5 rounded ${
+              mode === "register"
+                ? "bg-surface-1 text-text-1"
+                : "text-text-3 hover:text-text-2"
             }`}
           >
             Register
@@ -76,9 +80,11 @@ export function AuthPage(): React.ReactElement {
             />
           </label>
 
-          {mode === 'register' && (
+          {mode === "register" && (
             <label className="block">
-              <span className="block text-xs text-text-3 mb-1">Display name</span>
+              <span className="block text-xs text-text-3 mb-1">
+                Display name
+              </span>
               <input
                 type="text"
                 value={displayName}
@@ -110,15 +116,23 @@ export function AuthPage(): React.ReactElement {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-accent-1 hover:bg-accent-1/90 disabled:opacity-50 text-surface-0 font-medium text-sm py-2 rounded transition-colors"
+            className="w-full bg-primary hover:bg-primary/80 disabled:opacity-50 text-surface-0 font-medium text-sm py-2 rounded transition-colors cursor-pointer"
           >
-            {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
+            {loading
+              ? "Please wait…"
+              : mode === "login"
+                ? "Sign in"
+                : "Create account"}
           </button>
         </form>
 
         <p className="mt-4 text-xs text-text-4 text-center">
-          {mode === 'login' ? 'Seed account: ' : ''}
-          {mode === 'login' && <code className="text-text-3">alice@cloudcut.dev / password123</code>}
+          {mode === "login" ? "Seed account: " : ""}
+          {mode === "login" && (
+            <code className="text-text-3">
+              alice@cloudcut.dev / password123
+            </code>
+          )}
         </p>
       </div>
     </div>
