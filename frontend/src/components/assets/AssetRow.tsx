@@ -76,7 +76,23 @@ export function AssetRow({ asset }: AssetRowProps) {
       toast({ who: 'Assets', body: `Deleted ${asset.name}` });
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : (err as Error).message;
-      toast({ who: 'Delete failed', body: msg });
+      // 409 after we already cleared the *current* project's references means
+      // the asset is still used by clips in *other* projects in this
+      // workspace (we can't see them from here). The pre-check above is
+      // workspace-blind by design — fixing that would need a new
+      // `GET /assets/:id/references` endpoint. For now surface the situation
+      // via window.alert so the user gets a persistent, unmissable message
+      // instead of a toast that disappears under the presence pill.
+      if (err instanceof ApiError && err.status === 409) {
+        window.alert(
+          `Can't delete "${asset.name}".\n\n${msg}\n\n` +
+            `Tip: This asset may still be used by clips in another project ` +
+            `in this workspace. Switch to that project, remove the clips ` +
+            `there, then try again here.`,
+        );
+      } else {
+        toast({ who: 'Delete failed', body: msg });
+      }
       setDeleting(false);
     }
   };
