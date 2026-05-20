@@ -34,8 +34,8 @@ use tower::ServiceExt;
 enum Role {
     Viewer = 0,
     Editor = 1,
-    Admin  = 2,
-    Owner  = 3,
+    Admin = 2,
+    Owner = 3,
 }
 
 // ── Unit tests: Role ordering ──────────────────────────────────────────────────
@@ -47,7 +47,7 @@ mod role_ordering {
     fn full_hierarchy_is_ordered() {
         assert!(Role::Viewer < Role::Editor);
         assert!(Role::Editor < Role::Admin);
-        assert!(Role::Admin  < Role::Owner);
+        assert!(Role::Admin < Role::Owner);
     }
 
     #[test]
@@ -236,7 +236,12 @@ async fn editor_cannot_invite_members() {
 
 #[tokio::test]
 async fn editor_cannot_remove_members() {
-    let s = call(app(Role::Editor), "DELETE", "/workspaces/ws-1/members/user-2").await;
+    let s = call(
+        app(Role::Editor),
+        "DELETE",
+        "/workspaces/ws-1/members/user-2",
+    )
+    .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
 }
 
@@ -250,7 +255,12 @@ async fn admin_can_invite_members() {
 
 #[tokio::test]
 async fn admin_can_remove_members() {
-    let s = call(app(Role::Admin), "DELETE", "/workspaces/ws-1/members/user-2").await;
+    let s = call(
+        app(Role::Admin),
+        "DELETE",
+        "/workspaces/ws-1/members/user-2",
+    )
+    .await;
     assert_eq!(s, StatusCode::OK);
 }
 
@@ -261,13 +271,39 @@ async fn owner_passes_all_gates() {
     let router = app(Role::Owner);
 
     // Need separate router instances (oneshot consumes)
-    assert_eq!(call(app(Role::Owner), "GET",    "/projects/proj-1").await,              StatusCode::OK);
-    assert_eq!(call(app(Role::Owner), "POST",   "/projects/proj-1/clips").await,        StatusCode::OK);
-    assert_eq!(call(app(Role::Owner), "PATCH",  "/projects/proj-1/clips/clip-1").await, StatusCode::OK);
-    assert_eq!(call(app(Role::Owner), "POST",   "/projects/proj-1/exports").await,      StatusCode::OK);
-    assert_eq!(call(app(Role::Owner), "POST",   "/assets/presigned-url").await,         StatusCode::OK);
-    assert_eq!(call(app(Role::Owner), "POST",   "/workspaces/ws-1/invite").await,       StatusCode::OK);
-    assert_eq!(call(app(Role::Owner), "DELETE", "/workspaces/ws-1/members/user-2").await, StatusCode::OK);
+    assert_eq!(
+        call(app(Role::Owner), "GET", "/projects/proj-1").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(app(Role::Owner), "POST", "/projects/proj-1/clips").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(app(Role::Owner), "PATCH", "/projects/proj-1/clips/clip-1").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(app(Role::Owner), "POST", "/projects/proj-1/exports").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(app(Role::Owner), "POST", "/assets/presigned-url").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(app(Role::Owner), "POST", "/workspaces/ws-1/invite").await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(
+            app(Role::Owner),
+            "DELETE",
+            "/workspaces/ws-1/members/user-2"
+        )
+        .await,
+        StatusCode::OK
+    );
 
     drop(router); // suppress unused warning
 }

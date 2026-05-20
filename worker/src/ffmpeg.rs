@@ -25,8 +25,10 @@ pub struct ProbeResult {
 pub async fn probe(path: &Path) -> Result<ProbeResult, WorkerError> {
     let output = Command::new("ffprobe")
         .args([
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
         ])
@@ -47,15 +49,24 @@ pub async fn probe(path: &Path) -> Result<ProbeResult, WorkerError> {
 
     let streams = json["streams"].as_array();
     let has_video = streams
-        .map(|s| s.iter().any(|st| st["codec_type"].as_str() == Some("video")))
+        .map(|s| {
+            s.iter()
+                .any(|st| st["codec_type"].as_str() == Some("video"))
+        })
         .unwrap_or(false);
     let has_audio = streams
-        .map(|s| s.iter().any(|st| st["codec_type"].as_str() == Some("audio")))
+        .map(|s| {
+            s.iter()
+                .any(|st| st["codec_type"].as_str() == Some("audio"))
+        })
         .unwrap_or(false);
 
     // First video stream dims
     let (width, height) = streams
-        .and_then(|s| s.iter().find(|st| st["codec_type"].as_str() == Some("video")))
+        .and_then(|s| {
+            s.iter()
+                .find(|st| st["codec_type"].as_str() == Some("video"))
+        })
         .map(|st| {
             (
                 st["width"].as_i64().map(|v| v as i32),
@@ -72,11 +83,16 @@ pub async fn probe(path: &Path) -> Result<ProbeResult, WorkerError> {
     let size_bytes = json["format"]["size"]
         .as_str()
         .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or_else(|| {
-            std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0)
-        });
+        .unwrap_or_else(|| std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0));
 
-    Ok(ProbeResult { duration_ms, width, height, has_video, has_audio, size_bytes })
+    Ok(ProbeResult {
+        duration_ms,
+        width,
+        height,
+        has_video,
+        has_audio,
+        size_bytes,
+    })
 }
 
 // ─── Proxy ────────────────────────────────────────────────────────────────────
@@ -128,12 +144,17 @@ where
 pub async fn make_audio_proxy(input: &Path, output: &Path) -> Result<(), WorkerError> {
     run_ffmpeg(&[
         "-y",
-        "-i", input.to_str().unwrap(),
-        "-vn",          // strip video streams (cover art, etc.)
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-ac", "2",     // stereo
-        "-movflags", "+faststart",
+        "-i",
+        input.to_str().unwrap(),
+        "-vn", // strip video streams (cover art, etc.)
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ac",
+        "2", // stereo
+        "-movflags",
+        "+faststart",
         output.to_str().unwrap(),
     ])
     .await
@@ -149,11 +170,16 @@ pub async fn make_thumbnail(
 ) -> Result<(), WorkerError> {
     run_ffmpeg(&[
         "-y",
-        "-ss", &offset_secs.to_string(),
-        "-i", input.to_str().unwrap(),
-        "-vframes", "1",
-        "-vf", "scale='min(640,iw)':-2",
-        "-q:v", "4",
+        "-ss",
+        &offset_secs.to_string(),
+        "-i",
+        input.to_str().unwrap(),
+        "-vframes",
+        "1",
+        "-vf",
+        "scale='min(640,iw)':-2",
+        "-q:v",
+        "4",
         output.to_str().unwrap(),
     ])
     .await
@@ -172,10 +198,14 @@ pub async fn make_waveform(input: &Path, output: &Path) -> Result<(), WorkerErro
     // Extract raw mono 8 kHz signed 16-bit PCM
     run_ffmpeg(&[
         "-y",
-        "-i", input.to_str().unwrap(),
-        "-ac", "1",
-        "-ar", "8000",
-        "-f", "s16le",
+        "-i",
+        input.to_str().unwrap(),
+        "-ac",
+        "1",
+        "-ar",
+        "8000",
+        "-f",
+        "s16le",
         raw_tmp.to_str().unwrap(),
     ])
     .await?;
@@ -193,8 +223,7 @@ pub async fn make_waveform(input: &Path, output: &Path) -> Result<(), WorkerErro
     let data: Vec<u8> = samples
         .chunks(SAMPLES_PER_PIXEL)
         .map(|chunk| {
-            let rms = (chunk.iter().map(|&s| (s as f64).powi(2)).sum::<f64>()
-                / chunk.len() as f64)
+            let rms = (chunk.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / chunk.len() as f64)
                 .sqrt();
             // Normalise to 0-255 (i16 max = 32767)
             ((rms / 32767.0) * 255.0).min(255.0) as u8
@@ -336,8 +365,7 @@ where
         inputs.push(format!("-i {}", aclip.local_path.display()));
 
         let trim_start = aclip.trim_in_ms as f64 / 1000.0;
-        let trim_end =
-            trim_start + (aclip.dur_ms as f64 / 1000.0 / aclip.speed.max(0.01));
+        let trim_end = trim_start + (aclip.dur_ms as f64 / 1000.0 / aclip.speed.max(0.01));
         let input_idx = n_video + j;
         let delay = aclip.pos_ms.max(0);
 
@@ -351,8 +379,14 @@ where
     }
 
     // ── Concat: video clips → [vout]; their per-clip audio → [a_video] ──
-    let v_labels: String = (0..n_video).map(|i| format!("[v{i}]")).collect::<Vec<_>>().join("");
-    let a_labels: String = (0..n_video).map(|i| format!("[a{i}]")).collect::<Vec<_>>().join("");
+    let v_labels: String = (0..n_video)
+        .map(|i| format!("[v{i}]"))
+        .collect::<Vec<_>>()
+        .join("");
+    let a_labels: String = (0..n_video)
+        .map(|i| format!("[a{i}]"))
+        .collect::<Vec<_>>()
+        .join("");
     filter_parts.push(format!("{v_labels}concat=n={n_video}:v=1:a=0[vout];"));
 
     // Decide the final audio label target. With no audio-track clips we go
@@ -366,7 +400,10 @@ where
     // ── Mix video-track audio + all audio-track clips → [aout] ──
     if n_audio > 0 {
         filter_parts.push(";".into());
-        let aa_labels: String = (0..n_audio).map(|j| format!("[aa{j}]")).collect::<Vec<_>>().join("");
+        let aa_labels: String = (0..n_audio)
+            .map(|j| format!("[aa{j}]"))
+            .collect::<Vec<_>>()
+            .join("");
         let total_inputs = 1 + n_audio;
         // duration=first → output length follows [a_video] (= video duration),
         // so an mp3 longer than the timeline gets trimmed cleanly.
@@ -390,17 +427,27 @@ where
         }
     }
     args.extend([
-        "-filter_complex".into(), filter_complex,
-        "-map".into(), "[vout]".into(),
-        "-map".into(), "[aout]".into(),
-        "-c:v".into(), codec_v.into(),
-        "-preset".into(), "medium".into(),
-        "-crf".into(), "20".into(),
-        "-c:a".into(), codec_a.into(),
-        "-b:a".into(), "192k".into(),
-        "-movflags".into(), "+faststart".into(),
+        "-filter_complex".into(),
+        filter_complex,
+        "-map".into(),
+        "[vout]".into(),
+        "-map".into(),
+        "[aout]".into(),
+        "-c:v".into(),
+        codec_v.into(),
+        "-preset".into(),
+        "medium".into(),
+        "-crf".into(),
+        "20".into(),
+        "-c:a".into(),
+        codec_a.into(),
+        "-b:a".into(),
+        "192k".into(),
+        "-movflags".into(),
+        "+faststart".into(),
         // Progress stream → stdout, machine-parseable key=value pairs
-        "-progress".into(), "pipe:1".into(),
+        "-progress".into(),
+        "pipe:1".into(),
         "-nostats".into(),
         "-y".into(),
         spec.output.to_str().unwrap().to_owned(),
@@ -425,9 +472,18 @@ async fn run_ffmpeg(args: &[&str]) -> Result<(), WorkerError> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // Capture last 500 chars of stderr (ffmpeg is verbose)
-        let tail: String = stderr.chars().rev().take(500).collect::<String>()
-            .chars().rev().collect();
-        return Err(WorkerError::Ffmpeg(format!("exit {:?}: …{tail}", output.status.code())));
+        let tail: String = stderr
+            .chars()
+            .rev()
+            .take(500)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        return Err(WorkerError::Ffmpeg(format!(
+            "exit {:?}: …{tail}",
+            output.status.code()
+        )));
     }
 
     Ok(())
@@ -491,8 +547,7 @@ where
         if let Some(value) = line.strip_prefix("out_time_us=") {
             if total_us > 0 {
                 if let Ok(out_us) = value.trim().parse::<i64>() {
-                    let pct = ((out_us as f64 / total_us as f64) * 100.0)
-                        .clamp(0.0, 99.0) as i16;
+                    let pct = ((out_us as f64 / total_us as f64) * 100.0).clamp(0.0, 99.0) as i16;
                     if pct > last_emit {
                         last_emit = pct;
                         on_progress(pct).await;
@@ -511,8 +566,14 @@ where
     let stderr_text = stderr_handle.await.unwrap_or_default();
 
     if !status.success() {
-        let tail: String = stderr_text.chars().rev().take(500).collect::<String>()
-            .chars().rev().collect();
+        let tail: String = stderr_text
+            .chars()
+            .rev()
+            .take(500)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         return Err(WorkerError::Ffmpeg(format!(
             "exit {:?}: …{tail}",
             status.code()

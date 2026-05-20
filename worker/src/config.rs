@@ -59,7 +59,9 @@ where
     T::Err: std::fmt::Display,
 {
     match std::env::var(key) {
-        Ok(v) => v.parse::<T>().map_err(|e| anyhow::anyhow!("invalid {key}: {e}")),
+        Ok(v) => v
+            .parse::<T>()
+            .map_err(|e| anyhow::anyhow!("invalid {key}: {e}")),
         Err(_) => Ok(default),
     }
 }

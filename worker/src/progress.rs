@@ -7,7 +7,11 @@ use crate::error::WorkerError;
 
 /// Update the `progress_pct` column on an asset row.
 #[allow(dead_code)]
-pub async fn update_asset_progress(db: &PgPool, asset_id: Uuid, pct: i16) -> Result<(), WorkerError> {
+pub async fn update_asset_progress(
+    db: &PgPool,
+    asset_id: Uuid,
+    pct: i16,
+) -> Result<(), WorkerError> {
     sqlx::query("UPDATE assets SET progress_pct = $1 WHERE id = $2")
         .bind(pct)
         .bind(asset_id)

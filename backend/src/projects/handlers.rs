@@ -85,7 +85,8 @@ pub async fn create_project(
     Path(workspace_id): Path<Uuid>,
     Json(req): Json<CreateProjectReq>,
 ) -> Result<(StatusCode, Json<ProjectRow>), AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
     require_workspace_role(&state, workspace_id, auth.user_id, Role::Editor).await?;
 
     let row = sqlx::query_as::<_, ProjectRow>(
@@ -152,7 +153,8 @@ pub async fn update_project(
     Path(project_id): Path<Uuid>,
     Json(req): Json<UpdateProjectReq>,
 ) -> Result<Json<ProjectRow>, AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
     let existing = fetch_project(&state, project_id).await?;
     require_workspace_role(&state, existing.workspace_id, auth.user_id, Role::Editor).await?;
 
@@ -364,8 +366,12 @@ fn decode_cursor(cursor: Option<&str>) -> Result<(DateTime<Utc>, Uuid), AppError
             let s = String::from_utf8(bytes)
                 .map_err(|_| AppError::BadRequest("invalid cursor".into()))?;
             let mut parts = s.splitn(2, '|');
-            let ts_str = parts.next().ok_or_else(|| AppError::BadRequest("invalid cursor".into()))?;
-            let id_str = parts.next().ok_or_else(|| AppError::BadRequest("invalid cursor".into()))?;
+            let ts_str = parts
+                .next()
+                .ok_or_else(|| AppError::BadRequest("invalid cursor".into()))?;
+            let id_str = parts
+                .next()
+                .ok_or_else(|| AppError::BadRequest("invalid cursor".into()))?;
             let ts = ts_str
                 .parse::<DateTime<Utc>>()
                 .map_err(|_| AppError::BadRequest("invalid cursor timestamp".into()))?;
@@ -387,9 +393,7 @@ fn paginate(mut items: Vec<ProjectRow>, limit: i64) -> Result<Json<PagedProjects
         items.truncate(limit as usize);
     }
     let next_cursor = if has_more {
-        items
-            .last()
-            .map(|r| encode_cursor(&r.updated_at, &r.id))
+        items.last().map(|r| encode_cursor(&r.updated_at, &r.id))
     } else {
         None
     };

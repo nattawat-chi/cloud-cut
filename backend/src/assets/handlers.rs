@@ -69,9 +69,13 @@ pub async fn list_assets(
     .await?;
 
     let has_more = items.len() as i64 > limit;
-    if has_more { items.truncate(limit as usize); }
+    if has_more {
+        items.truncate(limit as usize);
+    }
     let next_cursor = if has_more {
-        items.last().map(|r| URL_SAFE_NO_PAD.encode(r.id.to_string()))
+        items
+            .last()
+            .map(|r| URL_SAFE_NO_PAD.encode(r.id.to_string()))
     } else {
         None
     };
@@ -87,7 +91,8 @@ pub async fn presign_upload(
     Path(workspace_id): Path<Uuid>,
     Json(req): Json<PresignRequest>,
 ) -> Result<(StatusCode, Json<PresignResponse>), AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
     require_workspace_role(&state, workspace_id, auth.user_id, Role::Editor).await?;
     rate_limit::check_upload(&state, workspace_id).await?;
 
@@ -101,9 +106,7 @@ pub async fn presign_upload(
 
     let asset_id = Uuid::new_v4();
     let ext = extension_from_filename(&req.filename);
-    let s3_key = format!(
-        "originals/{workspace_id}/{asset_id}/original.{ext}"
-    );
+    let s3_key = format!("originals/{workspace_id}/{asset_id}/original.{ext}");
     let content_type = content_type_for_kind(&req.kind, &ext);
 
     // Insert asset row with status = 'uploading'
@@ -169,11 +172,10 @@ pub async fn update_asset_status(
     }
 
     // Verify caller is a workspace member for this asset
-    let ws_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT workspace_id FROM assets WHERE id = $1")
-            .bind(asset_id)
-            .fetch_optional(&state.db)
-            .await?;
+    let ws_id: Option<Uuid> = sqlx::query_scalar("SELECT workspace_id FROM assets WHERE id = $1")
+        .bind(asset_id)
+        .fetch_optional(&state.db)
+        .await?;
     let ws_id = ws_id.ok_or_else(|| AppError::NotFound("asset".into()))?;
     require_workspace_role(&state, ws_id, auth.user_id, Role::Editor).await?;
 
@@ -218,22 +220,19 @@ pub async fn delete_asset(
     auth: AuthUser,
     Path(asset_id): Path<Uuid>,
 ) -> Result<axum::http::StatusCode, AppError> {
-    let ws_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT workspace_id FROM assets WHERE id = $1")
-            .bind(asset_id)
-            .fetch_optional(&state.db)
-            .await?;
+    let ws_id: Option<Uuid> = sqlx::query_scalar("SELECT workspace_id FROM assets WHERE id = $1")
+        .bind(asset_id)
+        .fetch_optional(&state.db)
+        .await?;
     let ws_id = ws_id.ok_or_else(|| AppError::NotFound("asset".into()))?;
     require_workspace_role(&state, ws_id, auth.user_id, Role::Editor).await?;
 
     // Block delete while any clip still references it — otherwise the timeline
     // would render orphan clips that crash on Inspector lookup.
-    let in_use: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM clips WHERE asset_id = $1)",
-    )
-    .bind(asset_id)
-    .fetch_one(&state.db)
-    .await?;
+    let in_use: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM clips WHERE asset_id = $1)")
+        .bind(asset_id)
+        .fetch_one(&state.db)
+        .await?;
     if in_use {
         return Err(AppError::Conflict(
             "asset is used by one or more clips — remove the clips first".into(),

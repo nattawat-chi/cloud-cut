@@ -27,8 +27,8 @@ use crate::{error::AppError, state::AppState};
 pub enum Role {
     Viewer = 0,
     Editor = 1,
-    Admin  = 2,
-    Owner  = 3,
+    Admin = 2,
+    Owner = 3,
 }
 
 impl FromStr for Role {
@@ -37,9 +37,9 @@ impl FromStr for Role {
         match s {
             "viewer" => Ok(Self::Viewer),
             "editor" => Ok(Self::Editor),
-            "admin"  => Ok(Self::Admin),
-            "owner"  => Ok(Self::Owner),
-            other    => Err(AppError::internal(format!("unknown role in DB: {other}"))),
+            "admin" => Ok(Self::Admin),
+            "owner" => Ok(Self::Owner),
+            other => Err(AppError::internal(format!("unknown role in DB: {other}"))),
         }
     }
 }
@@ -49,8 +49,8 @@ impl std::fmt::Display for Role {
         f.write_str(match self {
             Self::Viewer => "viewer",
             Self::Editor => "editor",
-            Self::Admin  => "admin",
-            Self::Owner  => "owner",
+            Self::Admin => "admin",
+            Self::Owner => "owner",
         })
     }
 }
@@ -61,10 +61,10 @@ impl std::fmt::Display for Role {
 /// - `AppError::Forbidden` if the caller is not a member, or has a lower role
 ///   than required.
 pub async fn require_workspace_role(
-    state:        &AppState,
+    state: &AppState,
     workspace_id: Uuid,
-    user_id:      Uuid,
-    min_role:     Role,
+    user_id: Uuid,
+    min_role: Role,
 ) -> Result<Role, AppError> {
     let role_str: Option<String> = sqlx::query_scalar(
         "SELECT role::text FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
@@ -87,10 +87,10 @@ pub async fn require_workspace_role(
 /// `project_id`.  Returns the caller's role; 404 if the project doesn't exist
 /// (or is archived), 403 if the caller isn't a member or lacks the role.
 pub async fn require_project_role(
-    state:      &AppState,
+    state: &AppState,
     project_id: Uuid,
-    user_id:    Uuid,
-    min_role:   Role,
+    user_id: Uuid,
+    min_role: Role,
 ) -> Result<Role, AppError> {
     let row: Option<(Uuid, Option<String>)> = sqlx::query_as(
         r#"

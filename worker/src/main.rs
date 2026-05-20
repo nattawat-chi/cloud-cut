@@ -69,7 +69,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn verify_ffmpeg() {
-    match std::process::Command::new("ffmpeg").arg("-version").output() {
+    match std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+    {
         Ok(out) if out.status.success() => {
             let ver = String::from_utf8_lossy(&out.stdout);
             let first = ver.lines().next().unwrap_or("unknown");

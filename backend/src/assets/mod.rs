@@ -18,9 +18,6 @@ pub fn router() -> Router<AppState> {
             "/workspaces/:workspace_id/assets/presign",
             post(handlers::presign_upload),
         )
-        .route(
-            "/assets/:id/status",
-            patch(handlers::update_asset_status),
-        )
+        .route("/assets/:id/status", patch(handlers::update_asset_status))
         .route("/assets/:id", delete(handlers::delete_asset))
 }

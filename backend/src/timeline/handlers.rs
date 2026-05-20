@@ -10,8 +10,8 @@ use validator::Validate;
 
 use crate::{
     auth::extractor::AuthUser,
-    error::AppError,
     collaboration::publish_project_event,
+    error::AppError,
     state::AppState,
     timeline::models::{
         AddClipReq, AddEffectReq, ClipRow, CreateTrackReq, EffectRow, SplitClipReq,
@@ -42,7 +42,11 @@ pub async fn get_timeline(
         effects.entry(fx.clip_id.to_string()).or_default().push(fx);
     }
 
-    Ok(Json(TimelineSnapshot { tracks, clips, effects }))
+    Ok(Json(TimelineSnapshot {
+        tracks,
+        clips,
+        effects,
+    }))
 }
 
 // ─── Tracks ───────────────────────────────────────────────────────────────────
@@ -62,7 +66,8 @@ pub async fn create_track(
     Path(project_id): Path<Uuid>,
     Json(req): Json<CreateTrackReq>,
 ) -> Result<(StatusCode, Json<TrackRow>), AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
     require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
     let valid_kinds = ["video", "audio", "subtitle"];
@@ -146,7 +151,8 @@ pub async fn add_clip(
     Path(track_id): Path<Uuid>,
     Json(req): Json<AddClipReq>,
 ) -> Result<(StatusCode, Json<ClipRow>), AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
     let project_id = track_project_id(&state, track_id).await?;
     require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
@@ -322,7 +328,8 @@ pub async fn add_effect(
     Path(clip_id): Path<Uuid>,
     Json(req): Json<AddEffectReq>,
 ) -> Result<(StatusCode, Json<EffectRow>), AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
     let (project_id, _) = clip_project_track(&state, clip_id).await?;
     require_project_role(&state, project_id, auth.user_id, Role::Editor).await?;
 
@@ -399,10 +406,7 @@ async fn track_project_id(state: &AppState, track_id: Uuid) -> Result<Uuid, AppE
         .ok_or_else(|| AppError::NotFound("track".into()))
 }
 
-async fn clip_project_track(
-    state: &AppState,
-    clip_id: Uuid,
-) -> Result<(Uuid, Uuid), AppError> {
+async fn clip_project_track(state: &AppState, clip_id: Uuid) -> Result<(Uuid, Uuid), AppError> {
     let row: Option<(Uuid, Uuid)> = sqlx::query_as(
         "SELECT t.project_id, c.track_id FROM clips c JOIN tracks t ON t.id = c.track_id WHERE c.id = $1",
     )
@@ -412,10 +416,7 @@ async fn clip_project_track(
     row.ok_or_else(|| AppError::NotFound("clip".into()))
 }
 
-async fn effect_project_clip(
-    state: &AppState,
-    effect_id: Uuid,
-) -> Result<(Uuid, Uuid), AppError> {
+async fn effect_project_clip(state: &AppState, effect_id: Uuid) -> Result<(Uuid, Uuid), AppError> {
     let row: Option<(Uuid, Uuid)> = sqlx::query_as(
         r#"SELECT t.project_id, ce.clip_id
            FROM clip_effects ce

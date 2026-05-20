@@ -51,8 +51,13 @@ pub async fn run(
     }
 
     let result = run_inner(
-        job_id, project_id, &format, &resolution,
-        db, config, s3_client,
+        job_id,
+        project_id,
+        &format,
+        &resolution,
+        db,
+        config,
+        s3_client,
     )
     .await;
 
@@ -74,7 +79,6 @@ async fn run_inner(
     config: &Config,
     s3_client: &aws_sdk_s3::Client,
 ) -> Result<(), WorkerError> {
-
     // ── Mark job as processing ──────────────────────────────────────────────
     sqlx::query(
         "UPDATE export_jobs SET status='processing'::job_status, started_at=now() WHERE id=$1",
@@ -163,10 +167,7 @@ async fn run_inner(
     let n_clips = clips.len().max(1);
 
     for (i, clip) in clips.iter().enumerate() {
-        let s3_key = clip
-            .original_key
-            .as_deref()
-            .or(clip.proxy_key.as_deref());
+        let s3_key = clip.original_key.as_deref().or(clip.proxy_key.as_deref());
         let Some(key) = s3_key else {
             tracing::warn!(i, "clip has no source asset, skipping");
             continue;
@@ -187,7 +188,14 @@ async fn run_inner(
             }
         };
 
-        paths_and_meta.push((local, clip.pos_ms, clip.dur_ms, clip.trim_in_ms, clip.speed, has_audio));
+        paths_and_meta.push((
+            local,
+            clip.pos_ms,
+            clip.dur_ms,
+            clip.trim_in_ms,
+            clip.speed,
+            has_audio,
+        ));
 
         // Linear 0 → 10% across the download phase
         let pct = ((i + 1) as f64 / n_clips as f64 * 10.0) as i16;
@@ -206,10 +214,7 @@ async fn run_inner(
         // Audio assets don't always have a worker-generated proxy — fall back
         // to the original_key (mp3/wav/etc.), which the browser-friendly
         // formats all play in ffmpeg too.
-        let s3_key = clip
-            .proxy_key
-            .as_deref()
-            .or(clip.original_key.as_deref());
+        let s3_key = clip.proxy_key.as_deref().or(clip.original_key.as_deref());
         let Some(key) = s3_key else {
             tracing::warn!(j, "audio clip has no source asset, skipping");
             continue;
@@ -222,15 +227,17 @@ async fn run_inner(
 
     let clip_refs: Vec<ffmpeg::ClipSpec<'_>> = paths_and_meta
         .iter()
-        .map(|(path, pos, dur, trim, speed, has_audio)| ffmpeg::ClipSpec {
-            local_path: path.as_path(),
-            pos_ms: *pos,
-            dur_ms: *dur,
-            trim_in_ms: *trim,
-            speed: *speed,
-            filters: "",
-            has_audio: *has_audio,
-        })
+        .map(
+            |(path, pos, dur, trim, speed, has_audio)| ffmpeg::ClipSpec {
+                local_path: path.as_path(),
+                pos_ms: *pos,
+                dur_ms: *dur,
+                trim_in_ms: *trim,
+                speed: *speed,
+                filters: "",
+                has_audio: *has_audio,
+            },
+        )
         .collect();
 
     let audio_clip_refs: Vec<ffmpeg::AudioClipSpec<'_>> = audio_paths_and_meta
@@ -264,25 +271,20 @@ async fn run_inner(
 
     // ── ffmpeg encode (progress 10% → 95%) ──────────────────────────────────
     let db_clone = db.clone();
-    let encode_result = ffmpeg::export_timeline(
-        &spec,
-        Some(total_duration_ms),
-        move |ffmpeg_pct| {
+    let encode_result =
+        ffmpeg::export_timeline(&spec, Some(total_duration_ms), move |ffmpeg_pct| {
             // Map ffmpeg's 0..100 into our 10..95 export-pipeline band.
             let pct = 10 + (ffmpeg_pct as f64 * 0.85) as i16;
             let db = db_clone.clone();
             async move {
-                let _ = sqlx::query(
-                    "UPDATE export_jobs SET progress_pct = $1 WHERE id = $2",
-                )
-                .bind(pct.min(95))
-                .bind(job_id)
-                .execute(&db)
-                .await;
+                let _ = sqlx::query("UPDATE export_jobs SET progress_pct = $1 WHERE id = $2")
+                    .bind(pct.min(95))
+                    .bind(job_id)
+                    .execute(&db)
+                    .await;
             }
-        },
-    )
-    .await;
+        })
+        .await;
 
     if let Err(e) = encode_result {
         fail_job(db, job_id, &e.to_string()).await?;
@@ -318,9 +320,14 @@ async fn run_inner(
         _ => "video/mp4",
     };
     let output_key = format!("exports/{project_id}/{job_id}/output.{ext}");
-    let upload_result =
-        storage::upload_file(s3_client, &config.s3_bucket, &output_key, &output_path, content_type)
-            .await;
+    let upload_result = storage::upload_file(
+        s3_client,
+        &config.s3_bucket,
+        &output_key,
+        &output_path,
+        content_type,
+    )
+    .await;
 
     upload_ticker.abort();
     upload_result?;

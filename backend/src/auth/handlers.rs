@@ -39,7 +39,8 @@ pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<TokenPairResponse>), AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     // Hash password with Argon2id
     let salt = SaltString::generate(&mut OsRng);
@@ -98,7 +99,8 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<TokenPairResponse>, AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     let row = sqlx::query_as::<_, UserRow>(
         "SELECT id, email, password_hash, display_name, avatar_url, created_at
@@ -228,10 +230,7 @@ pub async fn me(
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Generate a 256-bit random refresh token (hex-encoded) and persist its SHA-256 hash.
-async fn issue_token_pair(
-    state: &AppState,
-    row: &UserRow,
-) -> Result<(String, String), AppError> {
+async fn issue_token_pair(state: &AppState, row: &UserRow) -> Result<(String, String), AppError> {
     let access_token = encode_access_token(
         row.id,
         &row.email,
@@ -248,14 +247,12 @@ async fn issue_token_pair(
     let expires_at =
         Utc::now() + chrono::Duration::seconds(state.config.jwt_refresh_exp_secs as i64);
 
-    sqlx::query(
-        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
-    )
-    .bind(row.id)
-    .bind(&hash)
-    .bind(expires_at)
-    .execute(&state.db)
-    .await?;
+    sqlx::query("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)")
+        .bind(row.id)
+        .bind(&hash)
+        .bind(expires_at)
+        .execute(&state.db)
+        .await?;
 
     Ok((access_token, refresh_token))
 }
