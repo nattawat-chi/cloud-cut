@@ -98,4 +98,108 @@ INSERT INTO assets (id, workspace_id, name, kind, duration_ms, width, height, or
 INSERT INTO clips (id, track_id, asset_id, pos_ms, dur_ms, name) VALUES
   ('00000000-0000-0000-0000-000000000050', '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000040',  0,     30000, 'hero_shot.mp4'),
   ('00000000-0000-0000-0000-000000000051', '00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000041', 30000,  45000, 'product_demo.mp4'),
-  ('00000000-0000-0000-0000-000000000052', '00000000-0000-0000-0000-000000000032', '00000000-0000-0000-0000-000000000042',  0,     90000, 'background.mp3');
+  ('00000000-0000-0000-0000-000000000052', '00000000-0000-0000-0000-000000000032', '00000000-0000-0000-0000-000000000042',  0,     90000, 'background.mp3'),
+  -- Extra clip on V2 (B-roll overlap with hero_shot) — exercises overlap/composite paths in tests
+  ('00000000-0000-0000-0000-000000000053', '00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000041', 10000,  15000, 'product_demo_broll.mp4'),
+  -- SFX clip on A2 — second audio track, short percussive insert
+  ('00000000-0000-0000-0000-000000000054', '00000000-0000-0000-0000-000000000033', '00000000-0000-0000-0000-000000000042', 25000,  3000,  'sfx_whoosh.mp3');
+
+-- ─── Project #2 (Marketing reel — sparse but valid) ───────────────────────────
+-- A second project in the same workspace exercises multi-project flows:
+-- workspace-scoped asset reuse, per-project rate-limit boundaries, and the
+-- TopBar project dropdown that needs ≥2 entries to be meaningful.
+
+INSERT INTO projects (id, workspace_id, name, description, fps, resolution_w, resolution_h, duration_ms, created_by) VALUES (
+  '00000000-0000-0000-0000-000000000021',
+  '00000000-0000-0000-0000-000000000010',
+  'Social Cuts — Vertical Reels',
+  '15-second vertical edits for IG/TikTok.',
+  30, 1080, 1920, 15000,
+  '00000000-0000-0000-0000-000000000003'  -- Carlos (editor) created it
+);
+
+INSERT INTO tracks (id, project_id, kind, name, position) VALUES
+  ('00000000-0000-0000-0000-000000000034', '00000000-0000-0000-0000-000000000021', 'video', 'Video 1', 0),
+  ('00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0000-000000000021', 'audio', 'Audio 1', 1);
+
+INSERT INTO clips (id, track_id, asset_id, pos_ms, dur_ms, name) VALUES
+  ('00000000-0000-0000-0000-000000000055', '00000000-0000-0000-0000-000000000034', '00000000-0000-0000-0000-000000000040', 0, 15000, 'hero_shot_short.mp4'),
+  ('00000000-0000-0000-0000-000000000056', '00000000-0000-0000-0000-000000000035', '00000000-0000-0000-0000-000000000042', 0, 15000, 'background_trim.mp3');
+
+-- ─── Clip effects (sample — exercises filter graph + Inspector UI) ────────────
+-- One brightness + one contrast on the hero shot, a saturation boost on the
+-- B-roll, and a disabled blur on the demo clip (proves enabled=false is
+-- rendered as "off" in the UI without removing the row).
+
+INSERT INTO clip_effects (id, clip_id, type, value, enabled, position) VALUES
+  ('00000000-0000-0000-0000-000000000060', '00000000-0000-0000-0000-000000000050', 'brightness', 0.08, true,  0),
+  ('00000000-0000-0000-0000-000000000061', '00000000-0000-0000-0000-000000000050', 'contrast',   1.18, true,  1),
+  ('00000000-0000-0000-0000-000000000062', '00000000-0000-0000-0000-000000000053', 'saturation', 1.25, true,  0),
+  ('00000000-0000-0000-0000-000000000063', '00000000-0000-0000-0000-000000000051', 'blur',       2.00, false, 0);
+
+-- ─── Sample export jobs ───────────────────────────────────────────────────────
+-- One completed (with output_key + finished_at populated so the Export dialog
+-- can render the download link) and one mid-flight at 42% so the progress bar
+-- has a non-trivial value on a fresh login.
+
+INSERT INTO export_jobs (id, project_id, requested_by, status, format, resolution, output_key, progress_pct, started_at, finished_at, created_at) VALUES
+  (
+    '00000000-0000-0000-0000-000000000070',
+    '00000000-0000-0000-0000-000000000020',
+    '00000000-0000-0000-0000-000000000001',
+    'done', 'mp4', '1080',
+    'exports/00000000-0000-0000-0000-000000000020/00000000-0000-0000-0000-000000000070/output.mp4',
+    100,
+    now() - interval '15 minutes',
+    now() - interval '12 minutes',
+    now() - interval '15 minutes'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000071',
+    '00000000-0000-0000-0000-000000000020',
+    '00000000-0000-0000-0000-000000000003',
+    'processing', 'webm', '720',
+    NULL,
+    42,
+    now() - interval '90 seconds',
+    NULL,
+    now() - interval '90 seconds'
+  );
+
+-- ─── Sample operation logs (collaboration audit trail) ────────────────────────
+-- A handful of representative ops on Project #1 so:
+--   1. The History panel shows non-empty content on first load.
+--   2. The "give me ops since seq=X" reconciliation query has rows to chew.
+--   3. The partition routing (applied_at) is exercised on every test boot.
+
+INSERT INTO operation_logs (project_id, user_id, op_type, payload, applied_at) VALUES
+  (
+    '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000001',
+    'clip.add',
+    '{"clip_id":"00000000-0000-0000-0000-000000000050","track_id":"00000000-0000-0000-0000-000000000030","pos_ms":0,"dur_ms":30000}'::jsonb,
+    now() - interval '45 minutes'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000001',
+    'clip.move',
+    '{"clip_id":"00000000-0000-0000-0000-000000000051","from":{"pos_ms":15000},"to":{"pos_ms":30000}}'::jsonb,
+    now() - interval '40 minutes'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000002',
+    'effect.add',
+    '{"clip_id":"00000000-0000-0000-0000-000000000050","effect":{"type":"brightness","value":0.08,"enabled":true}}'::jsonb,
+    now() - interval '30 minutes'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000003',
+    'clip.trim',
+    '{"clip_id":"00000000-0000-0000-0000-000000000051","from":{"dur_ms":50000},"to":{"dur_ms":45000}}'::jsonb,
+    now() - interval '20 minutes'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000003',
+    'effect.update',
+    '{"clip_id":"00000000-0000-0000-0000-000000000050","effect_id":"00000000-0000-0000-0000-000000000061","from":1.0,"to":1.18}'::jsonb,
+    now() - interval '10 minutes'
+  );
