@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { Trash2Icon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { ApiError, assets as assetsApi } from '@/services/api';
+import { ApiError, assets as assetsApi, timeline as timelineApi } from '@/services/api';
 import { useAssetsStore } from '@/state/assetsStore';
 import { useHistoryStore } from '@/state/historyStore';
+import { useProjectStore } from '@/state/projectStore';
 import type { Asset } from '@/types';
 import { fmtClipDur } from '@/utils/timecode';
 
@@ -30,8 +31,42 @@ export function AssetRow({ asset }: AssetRowProps) {
     e.stopPropagation();
     e.preventDefault();
     if (deleting) return;
+
+    // Backend rejects DELETE /assets/:id with 409 while any clip references
+    // the asset (see backend/src/assets/handlers.rs::delete_asset). We mirror
+    // that check locally, ask the user for explicit consent, then cascade-
+    // delete the clips before retrying the asset delete — the user previously
+    // saw an opaque "409 Conflict" with no path forward.
+    const linkedClipIds = useProjectStore
+      .getState()
+      .clips.filter((c) => c.assetId === asset.id)
+      .map((c) => c.id);
+
+    if (linkedClipIds.length > 0) {
+      const n = linkedClipIds.length;
+      const ok = window.confirm(
+        `"${asset.name}" is used by ${n} clip${n > 1 ? 's' : ''} on the timeline.\n\n` +
+          `Remove ${n > 1 ? 'them' : 'it'} and delete the asset?`,
+      );
+      if (!ok) return;
+    }
+
     setDeleting(true);
     try {
+      if (linkedClipIds.length > 0) {
+        // Backend deletes must finish before we hit DELETE /assets/:id —
+        // otherwise the in-use check still sees the rows and returns 409.
+        // Skip temp-id clips (`c-tmp*`) — they have no server-side row yet.
+        const realIds = linkedClipIds.filter((id) => !id.startsWith('c-tmp'));
+        await Promise.all(
+          realIds.map((id) => timelineApi.deleteClip(id).catch(() => null)),
+        );
+        // Local mirror — removes clips, cleans up effects, deselects.
+        // The action also fires its own (now redundant) DELETEs; those just
+        // 404 silently which is fine.
+        useProjectStore.getState().deleteClips(linkedClipIds);
+      }
+
       await assetsApi.delete(asset.id);
       removeFromStore(asset.id);
       toast({ who: 'Assets', body: `Deleted ${asset.name}` });
