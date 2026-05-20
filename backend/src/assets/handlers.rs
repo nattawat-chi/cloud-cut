@@ -156,7 +156,6 @@ pub async fn presign_upload(
 
 // ─── PATCH /api/v1/assets/:id/status ─────────────────────────────────────────
 /// Called by the worker (or the client after upload) to advance the asset state machine.
-
 pub async fn update_asset_status(
     State(state): State<AppState>,
     auth: AuthUser,

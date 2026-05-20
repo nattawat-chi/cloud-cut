@@ -46,6 +46,9 @@ impl PusherClient {
         }))
     }
 
+    /// App key getter — currently unused by the live code but useful for
+    /// debug-logging the active Pusher config without exposing the secret.
+    #[allow(dead_code)]
     pub fn key(&self) -> &str {
         &self.key
     }

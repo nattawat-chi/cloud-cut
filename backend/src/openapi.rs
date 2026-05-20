@@ -76,11 +76,15 @@ use utoipa::{
     ),
     modifiers(&SecurityAddon),
 )]
+// utoipa derives all use sites internally via the `OpenApi` trait — clippy
+// sees them as unconstructed because we never write `let _ = ApiDoc;`.
+#[allow(dead_code)]
 pub struct ApiDoc;
 
 /// Injects the `bearer_auth` HTTP security scheme into the spec so endpoints
 /// marked with `security(("bearer_auth" = []))` render a working
 /// "Authorize" button in Swagger UI.
+#[allow(dead_code)]
 pub struct SecurityAddon;
 
 impl Modify for SecurityAddon {
