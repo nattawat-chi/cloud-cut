@@ -8,6 +8,10 @@ import { persist } from 'zustand/middleware';
 
 import { auth, ApiError, type UserResponse } from '@/services/api';
 
+// Module-level singleton so concurrent 401 retries share one refresh call
+// instead of racing to invalidate each other's tokens.
+let _refreshPromise: Promise<boolean> | null = null;
+
 interface AuthState {
   user: UserResponse | null;
   accessToken: string | null;
@@ -80,17 +84,25 @@ export const useAuthStore = create<AuthState>()(
       },
 
       refresh: async () => {
+        // Return the in-flight promise if one exists — prevents concurrent
+        // 401 retries (e.g. React StrictMode double-effect) from each trying
+        // to exchange the same refresh token, which invalidates the second call.
+        if (_refreshPromise) return _refreshPromise;
         const rt = get().refreshToken;
         if (!rt) return false;
-        try {
-          const r = await auth.refresh(rt);
-          set({ accessToken: r.access_token });
-          return true;
-        } catch {
-          // Refresh failed (expired or revoked) — force logout.
-          set({ user: null, accessToken: null, refreshToken: null });
-          return false;
-        }
+        _refreshPromise = (async () => {
+          try {
+            const r = await auth.refresh(rt);
+            set({ accessToken: r.access_token });
+            return true;
+          } catch {
+            set({ user: null, accessToken: null, refreshToken: null });
+            return false;
+          } finally {
+            _refreshPromise = null;
+          }
+        })();
+        return _refreshPromise;
       },
     }),
     {

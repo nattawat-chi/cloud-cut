@@ -40,7 +40,19 @@
       "Bash(xxd)",
       "Bash(RUST_LOG=\"backend=debug,backend::pusher=debug\" ./target/debug/backend.exe)",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5173/api/v1/pusher/auth -X POST)",
-      "Bash(curl -s -X POST http://localhost:8080/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"alice@cloudcut.dev\",\"password\":\"password123\"}')"
+      "Bash(curl -s -X POST http://localhost:8080/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"alice@cloudcut.dev\",\"password\":\"password123\"}')",
+      "Bash(cargo test *)",
+      "Bash(cargo check *)",
+      "Bash(pnpm exec *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Cobalt\\\\Desktop\\\\new-projects\\\\cloud-cut-readiness-test\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(npx tsc *)",
+      "Bash(grep -v \"//.*\")",
+      "Bash(grep -iE \"plan\\(:|\\\\.|s\\\\s|s$|\\\\[|=|\\\\\\)|,\\)\")",
+      "Bash(grep -v \"//\")",
+      "Bash(cargo build *)",
+      "Bash(git fetch *)",
+      "Bash(git rev-list *)"
     ]
   }
 }

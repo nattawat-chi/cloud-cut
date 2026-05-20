@@ -41,6 +41,7 @@ export const useCollabStore = create<CollabState>()((set) => ({
             x: patch.x,
             y: patch.y,
             timelineMs: patch.timelineMs,
+            playheadMs: patch.playheadMs,
           };
       return { cursors: { ...s.cursors, [userId]: next } };
     }),

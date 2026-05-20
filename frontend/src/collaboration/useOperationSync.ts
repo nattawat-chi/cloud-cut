@@ -14,6 +14,7 @@ import { useEffect } from 'react';
 
 import { getPusher, isPusherEnabled } from '@/services/pusher';
 import { useAuthStore } from '@/state/authStore';
+import { useCollabStore } from '@/state/collabStore';
 import { useProjectStore } from '@/state/projectStore';
 
 // ─── Payload shapes (mirror backend timeline/handlers.rs) ─────────────────────
@@ -44,6 +45,24 @@ interface ClipSplitPayload {
   readonly clips: readonly RemoteClip[];
 }
 
+interface RemoteCursorPayload {
+  readonly userId: string;
+  readonly timelineMs: number | null;
+  readonly visible: boolean;
+}
+
+interface RemoteViewportCursorPayload {
+  readonly userId: string;
+  readonly x: number | null;
+  readonly y: number | null;
+  readonly visible: boolean;
+}
+
+interface RemotePlayheadPayload {
+  readonly userId: string;
+  readonly playheadMs: number;
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useOperationSync(projectId: string | null): void {
@@ -57,11 +76,9 @@ export function useOperationSync(projectId: string | null): void {
     if (!pusher) return;
 
     const channelName = `presence-project-${projectId}`;
-    const channel = pusher.channel(channelName);
-
-    // If the channel isn't subscribed yet (usePresence runs concurrently),
-    // wait until subscription_succeeded before binding op handlers.
-    if (!channel) return;
+    // subscribe() is idempotent — returns the existing channel if usePresence
+    // already subscribed, or creates it when effects run in unexpected order.
+    const channel = pusher.subscribe(channelName);
 
     /** Skip events that originated from this browser tab to prevent echo loops. */
     const isOwnAction = (actor: string): boolean =>
@@ -87,16 +104,58 @@ export function useOperationSync(projectId: string | null): void {
       for (const c of p.clips) applyRemoteClipUpsert(c);
     };
 
-    channel.bind('clip:added',   onClipAdded);
-    channel.bind('clip:updated', onClipUpdated);
-    channel.bind('clip:deleted', onClipDeleted);
-    channel.bind('clip:split',   onClipSplit);
+    // ── Remote cursor / playhead (client events, peer-to-peer) ──────────────
+
+    const onRemoteCursorMove = (p: RemoteCursorPayload) => {
+      const { collaborators, setCursor } = useCollabStore.getState();
+      const collab = collaborators.find((c) => c.id === p.userId);
+      setCursor(p.userId, {
+        target: 'timeline',
+        timelineMs: p.timelineMs ?? undefined,
+        visible: p.visible,
+        label: collab?.name ?? 'Unknown',
+        editingClipId: null,
+      });
+    };
+
+    const onRemoteViewportCursor = (p: RemoteViewportCursorPayload) => {
+      const { collaborators, setCursor } = useCollabStore.getState();
+      const collab = collaborators.find((c) => c.id === p.userId);
+      setCursor(p.userId, {
+        target: 'viewport',
+        x: p.x ?? undefined,
+        y: p.y ?? undefined,
+        visible: p.visible,
+        label: collab?.name ?? 'Unknown',
+        editingClipId: null,
+      });
+    };
+
+    const onRemotePlayheadSeek = (p: RemotePlayheadPayload) => {
+      const { collaborators, setCursor } = useCollabStore.getState();
+      const collab = collaborators.find((c) => c.id === p.userId);
+      setCursor(p.userId, {
+        playheadMs: p.playheadMs,
+        label: collab?.name ?? 'Unknown',
+      });
+    };
+
+    channel.bind('clip:added',               onClipAdded);
+    channel.bind('clip:updated',             onClipUpdated);
+    channel.bind('clip:deleted',             onClipDeleted);
+    channel.bind('clip:split',               onClipSplit);
+    channel.bind('client-cursor:move',       onRemoteCursorMove);
+    channel.bind('client-cursor:viewport',   onRemoteViewportCursor);
+    channel.bind('client-playhead:seek',     onRemotePlayheadSeek);
 
     return () => {
-      channel.unbind('clip:added',   onClipAdded);
-      channel.unbind('clip:updated', onClipUpdated);
-      channel.unbind('clip:deleted', onClipDeleted);
-      channel.unbind('clip:split',   onClipSplit);
+      channel.unbind('clip:added',             onClipAdded);
+      channel.unbind('clip:updated',           onClipUpdated);
+      channel.unbind('clip:deleted',           onClipDeleted);
+      channel.unbind('clip:split',             onClipSplit);
+      channel.unbind('client-cursor:move',     onRemoteCursorMove);
+      channel.unbind('client-cursor:viewport', onRemoteViewportCursor);
+      channel.unbind('client-playhead:seek',   onRemotePlayheadSeek);
     };
   }, [projectId, applyRemoteClipUpsert, applyRemoteClipDelete]);
 }

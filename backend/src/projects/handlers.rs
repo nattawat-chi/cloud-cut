@@ -162,8 +162,11 @@ pub async fn update_project(
         SET name          = COALESCE($1, name),
             description   = COALESCE($2, description),
             duration_ms   = COALESCE($3, duration_ms),
-            thumbnail_url = COALESCE($4, thumbnail_url)
-        WHERE id = $5
+            thumbnail_url = COALESCE($4, thumbnail_url),
+            fps           = COALESCE($5, fps),
+            resolution_w  = COALESCE($6, resolution_w),
+            resolution_h  = COALESCE($7, resolution_h)
+        WHERE id = $8
         RETURNING id, workspace_id, name, description, fps, resolution_w, resolution_h,
                   duration_ms, thumbnail_url, archived, created_by, created_at, updated_at
         "#,
@@ -172,6 +175,9 @@ pub async fn update_project(
     .bind(req.description.as_deref())
     .bind(req.duration_ms)
     .bind(req.thumbnail_url.as_deref())
+    .bind(req.fps)
+    .bind(req.resolution_w)
+    .bind(req.resolution_h)
     .bind(project_id)
     .fetch_one(&state.db)
     .await?;
@@ -206,6 +212,127 @@ pub async fn archive_project(
         .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── POST /api/v1/projects/:id/duplicate ─────────────────────────────────────
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/projects/{id}/duplicate",
+    params(("id" = Uuid, Path, description = "Project UUID to copy")),
+    responses(
+        (status = 201, description = "Duplicated project", body = ProjectRow),
+        (status = 403, description = "Insufficient role — editor+ required"),
+        (status = 404, description = "Project not found"),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "projects",
+)]
+pub async fn duplicate_project(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(project_id): Path<Uuid>,
+) -> Result<(StatusCode, Json<ProjectRow>), AppError> {
+    let src = fetch_project(&state, project_id).await?;
+    require_workspace_role(&state, src.workspace_id, auth.user_id, Role::Editor).await?;
+
+    let mut tx = state.db.begin().await?;
+
+    // ── 1. Copy project row ──────────────────────────────────────────────────
+    let new_project = sqlx::query_as::<_, ProjectRow>(
+        r#"
+        INSERT INTO projects
+            (workspace_id, name, description, fps, resolution_w, resolution_h,
+             duration_ms, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, workspace_id, name, description, fps, resolution_w, resolution_h,
+                  duration_ms, thumbnail_url, archived, created_by, created_at, updated_at
+        "#,
+    )
+    .bind(src.workspace_id)
+    .bind(format!("Copy of {}", src.name))
+    .bind(&src.description)
+    .bind(src.fps)
+    .bind(src.resolution_w)
+    .bind(src.resolution_h)
+    .bind(src.duration_ms)
+    .bind(auth.user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // ── 2. Copy tracks, keeping a map old_id → new_id ────────────────────────
+    let src_tracks = sqlx::query!(
+        "SELECT id, kind::text AS kind, name, position, muted, locked
+         FROM tracks WHERE project_id = $1 ORDER BY position",
+        project_id
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    for track in &src_tracks {
+        let new_track_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            INSERT INTO tracks (project_id, kind, name, position, muted, locked)
+            VALUES ($1, $2::track_kind, $3, $4, $5, $6)
+            RETURNING id
+            "#,
+        )
+        .bind(new_project.id)
+        .bind(&track.kind)
+        .bind(&track.name)
+        .bind(track.position)
+        .bind(track.muted)
+        .bind(track.locked)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        // ── 3. Copy clips for this track ────────────────────────────────────
+        let src_clips = sqlx::query!(
+            "SELECT id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms,
+                    speed::float8 AS speed, name
+             FROM clips WHERE track_id = $1",
+            track.id
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        for clip in &src_clips {
+            let new_clip_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                INSERT INTO clips
+                    (track_id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms, speed, name)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id
+                "#,
+            )
+            .bind(new_track_id)
+            .bind(clip.asset_id)
+            .bind(clip.pos_ms)
+            .bind(clip.dur_ms)
+            .bind(clip.trim_in_ms)
+            .bind(clip.trim_out_ms)
+            .bind(clip.speed)
+            .bind(&clip.name)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            // ── 4. Copy effects for this clip ────────────────────────────────
+            sqlx::query(
+                r#"
+                INSERT INTO clip_effects (clip_id, type, value, enabled, position)
+                SELECT $1, type, value, enabled, position
+                FROM clip_effects WHERE clip_id = $2
+                "#,
+            )
+            .bind(new_clip_id)
+            .bind(clip.id)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
+    Ok((StatusCode::CREATED, Json(new_project)))
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

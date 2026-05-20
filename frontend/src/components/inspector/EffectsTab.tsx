@@ -13,6 +13,7 @@ import { EffectEditor } from './EffectEditor';
 
 interface EffectsTabProps {
   clip: Clip;
+  readOnly?: boolean;
 }
 
 const EFFECT_TYPES: ReadonlyArray<EffectType> = [
@@ -27,7 +28,7 @@ const EFFECT_TYPES: ReadonlyArray<EffectType> = [
  * Each effect is bound to projectStore so dragging a slider repaints the
  * player preview through `filterFromEffects()`.
  */
-export function EffectsTab({ clip }: EffectsTabProps) {
+export function EffectsTab({ clip, readOnly = false }: EffectsTabProps) {
   const effects = useProjectStore(selectEffectsForClip(clip.id));
   const addEffect = useProjectStore((s) => s.addEffect);
   const toggleEffectsBrowser = useUIStore((s) => s.toggleEffectsBrowser);
@@ -41,59 +42,63 @@ export function EffectsTab({ clip }: EffectsTabProps) {
           <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-text-3">
             Effects · {effects.length}
           </span>
-          <button
-            type="button"
-            onClick={toggleEffectsBrowser}
-            className="rounded px-1.5 text-[10px] text-text-3 hover:bg-surface-3 hover:text-text-1"
-            style={{ height: 20 }}
-          >
-            Browse
-          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={toggleEffectsBrowser}
+              className="rounded px-1.5 text-[10px] text-text-3 hover:bg-surface-3 hover:text-text-1"
+              style={{ height: 20 }}
+            >
+              Browse
+            </button>
+          )}
         </div>
 
         {effects.map((fx) => (
-          <EffectEditor key={fx.id} clipId={clip.id} fx={fx} />
+          <EffectEditor key={fx.id} clipId={clip.id} fx={fx} readOnly={readOnly} />
         ))}
 
-        <details className="group mt-2">
-          <summary className="list-none">
-            <span
-              className={cn(
-                'flex h-[30px] cursor-pointer items-center justify-center gap-1.5',
-                'rounded-md border border-dashed border-line bg-surface-2',
-                'text-[11px] text-text-3 hover:border-accent hover:text-accent',
-              )}
-            >
-              <PlusIcon size={12} /> Add Effect
-            </span>
-          </summary>
-          <div className="mt-1.5 grid gap-1">
-            {EFFECT_TYPES.map((type) => {
-              const already = hasType(type);
-              return (
-                <button
-                  key={type}
-                  type="button"
-                  disabled={already}
-                  onClick={() => addEffect(clip.id, type)}
-                  className={cn(
-                    'flex h-[26px] w-full items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2',
-                    'text-[11px] text-text-2',
-                    already
-                      ? 'cursor-default opacity-50'
-                      : 'hover:bg-surface-3 hover:text-text-1',
-                  )}
-                >
-                  <SparklesIcon size={11} />
-                  <span>{EFFECT_META[type].label}</span>
-                  {already && (
-                    <span className="ml-auto text-[10px] text-text-4">added</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </details>
+        {!readOnly && (
+          <details className="group mt-2">
+            <summary className="list-none">
+              <span
+                className={cn(
+                  'flex h-[30px] cursor-pointer items-center justify-center gap-1.5',
+                  'rounded-md border border-dashed border-line bg-surface-2',
+                  'text-[11px] text-text-3 hover:border-accent hover:text-accent',
+                )}
+              >
+                <PlusIcon size={12} /> Add Effect
+              </span>
+            </summary>
+            <div className="mt-1.5 grid gap-1">
+              {EFFECT_TYPES.map((type) => {
+                const already = hasType(type);
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    disabled={already}
+                    onClick={() => addEffect(clip.id, type)}
+                    className={cn(
+                      'flex h-[26px] w-full items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2',
+                      'text-[11px] text-text-2',
+                      already
+                        ? 'cursor-default opacity-50'
+                        : 'hover:bg-surface-3 hover:text-text-1',
+                    )}
+                  >
+                    <SparklesIcon size={11} />
+                    <span>{EFFECT_META[type].label}</span>
+                    {already && (
+                      <span className="ml-auto text-[10px] text-text-4">added</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </details>
+        )}
       </div>
 
       <CssReadout effects={effects} />

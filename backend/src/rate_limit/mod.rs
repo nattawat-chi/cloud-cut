@@ -53,6 +53,67 @@ async fn fetch_plan(state: &AppState, workspace_id: Uuid) -> Result<String, AppE
     Ok(plan.unwrap_or_else(|| "free".into()))
 }
 
+/// Current usage snapshot for a workspace — used by `GET /workspaces/:id/usage`
+/// so the frontend can show "3/50 uploads this hour" instead of just the cap.
+pub struct UsageSnapshot {
+    pub plan: String,
+    pub uploads_used: i64,
+    pub uploads_limit: i64,
+    /// Seconds until the upload bucket rolls — derived from Redis TTL on the
+    /// hourly key (or 0 when the bucket hasn't been written this hour yet).
+    pub uploads_reset_in_secs: i64,
+    pub exports_concurrent_used: i64,
+    pub exports_concurrent_limit: i64,
+}
+
+/// Read the current upload + concurrent-export counters without mutating them.
+/// Safe to poll from the frontend at ~10s cadence; pure GETs only.
+pub async fn snapshot_usage(
+    state: &AppState,
+    workspace_id: Uuid,
+) -> Result<UsageSnapshot, AppError> {
+    let plan = fetch_plan(state, workspace_id).await?;
+    let uploads_limit = upload_limit(&plan);
+    let exports_concurrent_limit = export_concurrent_limit(&plan);
+
+    let bucket = Utc::now().format("%Y-%m-%dT%H").to_string();
+    let upload_key = format!("cloudcut:uploads:{workspace_id}:{bucket}");
+    let export_key = format!("cloudcut:exports:concurrent:{workspace_id}");
+
+    let mut conn = redis_conn(state).await?;
+
+    // Missing key → 0. Negative values shouldn't be possible but clamp anyway
+    // so a corrupted counter never produces nonsensical UI numbers.
+    let uploads_used: i64 = conn
+        .get::<_, Option<i64>>(&upload_key)
+        .await
+        .map_err(|e| AppError::internal(format!("redis get uploads: {e}")))?
+        .unwrap_or(0)
+        .max(0);
+    let exports_concurrent_used: i64 = conn
+        .get::<_, Option<i64>>(&export_key)
+        .await
+        .map_err(|e| AppError::internal(format!("redis get exports: {e}")))?
+        .unwrap_or(0)
+        .max(0);
+
+    // Redis TTL returns -1 if key has no TTL, -2 if key doesn't exist.
+    let ttl: i64 = conn
+        .ttl(&upload_key)
+        .await
+        .map_err(|e| AppError::internal(format!("redis ttl: {e}")))?;
+    let uploads_reset_in_secs = if ttl > 0 { ttl } else { 0 };
+
+    Ok(UsageSnapshot {
+        plan,
+        uploads_used,
+        uploads_limit,
+        uploads_reset_in_secs,
+        exports_concurrent_used,
+        exports_concurrent_limit,
+    })
+}
+
 async fn redis_conn(state: &AppState) -> Result<redis::aio::MultiplexedConnection, AppError> {
     state
         .redis

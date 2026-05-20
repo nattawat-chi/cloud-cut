@@ -8,12 +8,14 @@ import {
   MoonIcon,
   RedoIcon,
   Share2Icon,
+  ShieldIcon,
   SunIcon,
   UndoIcon,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/state/authStore';
+import { usePermissions } from '@/hooks/usePermissions';
 import {
   selectCanRedo,
   selectCanUndo,
@@ -25,6 +27,7 @@ import { useUIStore } from '@/state/uiStore';
 import { fmtClipDur } from '@/utils/timecode';
 
 import { Presence } from './Presence';
+import { WorkspaceProjectSelector } from './WorkspaceProjectSelector';
 
 export function TopBar() {
   const project = useProjectStore((s) => s.project);
@@ -41,6 +44,9 @@ export function TopBar() {
   const toggleHistoryPanel = useUIStore((s) => s.toggleHistoryPanel);
   const showPresence = useUIStore((s) => s.showPresence);
   const toast = useHistoryStore((s) => s.toast);
+  const { canExport, role } = usePermissions();
+  const showMembersPanel = useUIStore((s) => s.showMembersPanel);
+  const toggleMembersPanel = useUIStore((s) => s.toggleMembersPanel);
 
   const handleShare = async () => {
     const url = window.location.href;
@@ -80,18 +86,11 @@ export function TopBar() {
         <span className="text-text-4">/</span>
       </div>
 
-      {/* Project crumb */}
+      {/* Workspace + project selector */}
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
         {project ? (
           <>
-            <span className="shrink-0 text-text-3">{project.workspace}</span>
-            <span className="shrink-0 text-text-4">/</span>
-            <span
-              title={project.name}
-              className="min-w-0 shrink truncate font-medium text-text-1"
-            >
-              {project.name}
-            </span>
+            <WorkspaceProjectSelector />
             <span className="ml-2 inline-flex shrink-0 items-center gap-1.5 px-1.5 text-xs text-text-3">
               <span className="h-1.5 w-1.5 rounded-full bg-status-ok" />
               Saved · just now
@@ -135,8 +134,15 @@ export function TopBar() {
       {showPresence && (
         <>
           <Divider />
-          <div className="shrink-0">
+          <div className="flex shrink-0 items-center gap-1.5">
             <Presence />
+            <IconBtn
+              title="Manage members"
+              onClick={toggleMembersPanel}
+              active={showMembersPanel}
+            >
+              <ShieldIcon size={13} />
+            </IconBtn>
           </div>
         </>
       )}
@@ -172,10 +178,13 @@ export function TopBar() {
         </button>
         <button
           type="button"
-          onClick={() => useUIStore.getState().toggleExportDialog()}
+          onClick={() => canExport && useUIStore.getState().toggleExportDialog()}
+          disabled={!canExport}
+          title={!canExport ? `${role ?? 'viewer'} role — export not allowed` : 'Export project'}
           className={cn(
             'inline-flex h-[30px] items-center gap-1.5 rounded-md bg-accent px-3',
             'text-xs font-semibold text-accent-foreground hover:brightness-105',
+            !canExport && 'cursor-not-allowed opacity-40 hover:brightness-100',
           )}
         >
           <DownloadIcon size={13} /> Export

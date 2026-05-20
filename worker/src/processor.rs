@@ -23,10 +23,11 @@ pub async fn dispatch(
     db: &PgPool,
     config: &Config,
     s3: &aws_sdk_s3::Client,
+    redis: &redis::Client,
 ) -> Result<(), WorkerError> {
     match stream {
         crate::queue::EXPORT_STREAM => {
-            crate::export_pipeline::run(fields, db, config, s3).await
+            crate::export_pipeline::run(fields, db, config, s3, redis).await
         }
         crate::queue::ASSET_STREAM => {
             crate::asset_pipeline::run(fields, db, config, s3).await

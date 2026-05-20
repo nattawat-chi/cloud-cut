@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 
 import { AuthPage } from '@/components/auth/AuthPage';
-import { CollaboratorList } from '@/components/collaboration/CollaboratorList';
+import { CollaboratorList } from '@/collaboration/CollaboratorList';
 import { EditorLayout } from '@/components/layout/EditorLayout';
 import { EffectsBrowser } from '@/components/overlays/EffectsBrowser';
 import { ExportDialog } from '@/components/overlays/ExportDialog';
 import { HistoryPanel } from '@/components/overlays/HistoryPanel';
+import { MembersPanel } from '@/components/overlays/MembersPanel';
+import { ProjectSettingsDialog } from '@/components/overlays/ProjectSettingsDialog';
 import { ShortcutsOverlay } from '@/components/overlays/ShortcutsOverlay';
 import { ToastStack } from '@/components/overlays/ToastStack';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
-import { ApiError, projects as projectsApi, workspaces as workspacesApi } from '@/services/api';
+import { ApiError } from '@/services/api';
 import { selectIsAuthenticated, useAuthStore } from '@/state/authStore';
 import { useProjectStore } from '@/state/projectStore';
 
@@ -20,8 +22,10 @@ import { useProjectStore } from '@/state/projectStore';
 export default function App() {
   const authed = useAuthStore(selectIsAuthenticated);
   const projectLoaded = useProjectStore((s) => s.project !== null);
-  const loadProjectFromApi = useProjectStore((s) => s.loadProjectFromApi);
+  const refreshWorkspaces = useProjectStore((s) => s.refreshWorkspaces);
+  const selectWorkspace = useProjectStore((s) => s.selectWorkspace);
   const loadMockProject = useProjectStore((s) => s.loadMockProject);
+  const setMyRole = useProjectStore((s) => s.setMyRole);
   const logout = useAuthStore((s) => s.logout);
 
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -33,18 +37,21 @@ export default function App() {
 
     (async () => {
       try {
-        // 1. List the user's workspaces — pick the first.
-        const ws = await workspacesApi.list();
-        if (!ws[0]) throw new Error('You have no workspaces yet. Create one in the database.');
+        // 1. Hydrate the workspace list — feeds the TopBar workspace dropdown.
+        await refreshWorkspaces();
+        if (cancelled) return;
+        const wsList = useProjectStore.getState().availableWorkspaces;
+        if (!wsList[0]) throw new Error('You have no workspaces yet. Create one in the database.');
 
-        // 2. List projects in that workspace — pick the most recent.
-        const projList = await projectsApi.list(ws[0].id);
-        if (!projList.items[0]) {
+        // 2. Switch into the first workspace — this also lists its projects
+        //    (feeds the project dropdown) and loads the first project.
+        await selectWorkspace(wsList[0].id);
+        if (cancelled) return;
+
+        const projects = useProjectStore.getState().availableProjects;
+        if (!projects[0]) {
           throw new Error('No projects in your workspace. Run the seed migration or create one via API.');
         }
-
-        if (cancelled) return;
-        await loadProjectFromApi(projList.items[0].id);
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof ApiError ? e.message : (e as Error).message;
@@ -58,13 +65,15 @@ export default function App() {
         }
 
         setBootstrapError(msg);
-        // Backend down / no workspaces: fall back to mock so the UI still renders.
+        // Backend down / no workspaces: fall back to mock. Default to editor
+        // so the mock session is fully interactive.
+        setMyRole('editor');
         loadMockProject();
       }
     })();
 
     return () => { cancelled = true; };
-  }, [authed, projectLoaded, loadProjectFromApi, loadMockProject]);
+  }, [authed, projectLoaded, refreshWorkspaces, selectWorkspace, loadMockProject, setMyRole]);
 
   useKeyboardShortcuts();
 
@@ -75,6 +84,8 @@ export default function App() {
       <EditorLayout />
       <CollaboratorList />
       <HistoryPanel />
+      <MembersPanel />
+      <ProjectSettingsDialog />
       <ShortcutsOverlay />
       <EffectsBrowser />
       <ExportDialog />

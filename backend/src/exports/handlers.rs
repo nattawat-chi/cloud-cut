@@ -1,9 +1,11 @@
+use aws_sdk_s3::presigning::PresigningConfig;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
 use redis::AsyncCommands;
+use std::time::Duration;
 use uuid::Uuid;
 use validator::Validate;
 
@@ -15,6 +17,31 @@ use crate::{
     state::AppState,
     workspaces::authz::{require_project_role, Role},
 };
+
+/// Generate a presigned GET URL for a finished export's `output_key`.
+/// Returns `None` when the job hasn't produced an output yet or the presign
+/// call fails (logged at warn — we still want to return the job row).
+async fn presign_download_url(state: &AppState, output_key: Option<&str>) -> Option<String> {
+    let key = output_key?;
+    let cfg = PresigningConfig::builder()
+        .expires_in(Duration::from_secs(state.config.s3_presign_expires_secs))
+        .build()
+        .ok()?;
+    match state
+        .s3
+        .get_object()
+        .bucket(&state.config.s3_bucket)
+        .key(key)
+        .presigned(cfg)
+        .await
+    {
+        Ok(p) => Some(p.uri().to_string()),
+        Err(e) => {
+            tracing::warn!(error=%e, key=%key, "presign download URL failed");
+            None
+        }
+    }
+}
 
 const EXPORT_STREAM: &str = "cloudcut:exports";
 
@@ -110,7 +137,7 @@ pub async fn get_export(
     auth: AuthUser,
     Path(job_id): Path<Uuid>,
 ) -> Result<Json<ExportJobRow>, AppError> {
-    let job = sqlx::query_as::<_, ExportJobRow>(
+    let mut job = sqlx::query_as::<_, ExportJobRow>(
         r#"SELECT id, project_id, requested_by, status::text AS status, format::text AS format, resolution::text AS resolution, output_key,
                   progress_pct, error_msg, started_at, finished_at, created_at
            FROM export_jobs WHERE id = $1"#,
@@ -121,6 +148,10 @@ pub async fn get_export(
     .ok_or_else(|| AppError::NotFound("export job".into()))?;
 
     require_project_role(&state, job.project_id, auth.user_id, Role::Viewer).await?;
+
+    if job.status == "done" {
+        job.download_url = presign_download_url(&state, job.output_key.as_deref()).await;
+    }
     Ok(Json(job))
 }
 
@@ -143,7 +174,7 @@ pub async fn list_exports(
 ) -> Result<Json<Vec<ExportJobRow>>, AppError> {
     require_project_role(&state, project_id, auth.user_id, Role::Viewer).await?;
 
-    let jobs = sqlx::query_as::<_, ExportJobRow>(
+    let mut jobs = sqlx::query_as::<_, ExportJobRow>(
         r#"SELECT id, project_id, requested_by, status::text AS status, format::text AS format, resolution::text AS resolution, output_key,
                   progress_pct, error_msg, started_at, finished_at, created_at
            FROM export_jobs
@@ -154,6 +185,12 @@ pub async fn list_exports(
     .bind(project_id)
     .fetch_all(&state.db)
     .await?;
+
+    for job in &mut jobs {
+        if job.status == "done" {
+            job.download_url = presign_download_url(&state, job.output_key.as_deref()).await;
+        }
+    }
 
     Ok(Json(jobs))
 }

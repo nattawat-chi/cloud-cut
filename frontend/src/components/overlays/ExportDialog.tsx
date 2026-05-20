@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 
 import { cn } from '@/lib/utils';
+import { PLAN_LIMITS } from '@/components/topbar/WorkspaceProjectSelector';
+import { useWorkspaceUsage } from '@/hooks/useWorkspaceUsage';
 import { ApiError, exports_, type ExportJobResponse } from '@/services/api';
 import { useHistoryStore } from '@/state/historyStore';
 import { useProjectStore } from '@/state/projectStore';
@@ -30,6 +32,11 @@ export function ExportDialog(): React.ReactElement | null {
   const open = useUIStore((s) => s.showExportDialog);
   const toggle = useUIStore((s) => s.toggleExportDialog);
   const projectId = useProjectStore((s) => s.project?.id);
+  const currentWorkspaceId = useProjectStore((s) => s.currentWorkspaceId);
+  const currentPlan = useProjectStore((s) =>
+    s.availableWorkspaces.find((w) => w.id === currentWorkspaceId)?.plan ?? 'free',
+  );
+  const { usage } = useWorkspaceUsage(currentWorkspaceId);
   const toast = useHistoryStore((s) => s.toast);
 
   const [format, setFormat] = useState<Format>('mp4');
@@ -83,7 +90,54 @@ export function ExportDialog(): React.ReactElement | null {
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-md rounded-lg border border-surface-3 bg-surface-1 p-5 shadow-xl"
       >
-        <h2 className="text-base font-semibold tracking-tight mb-3">Export project</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-base font-semibold tracking-tight">Export project</h2>
+          <span
+            title={`${PLAN_LIMITS[currentPlan].uploadsPerHour} uploads/hour · ${PLAN_LIMITS[currentPlan].concurrentExports} concurrent exports`}
+            className={cn(
+              'rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider',
+              currentPlan === 'free' && 'bg-surface-3 text-text-3',
+              currentPlan === 'pro' && 'bg-accent/15 text-accent',
+              currentPlan === 'team' && 'bg-amber-500/15 text-amber-300',
+            )}
+          >
+            {currentPlan} plan
+          </span>
+        </div>
+
+        <div className="mb-3 space-y-1 rounded border border-line bg-surface-2 px-2.5 py-1.5 text-[10.5px] text-text-3">
+          {usage ? (
+            <>
+              <div>
+                Exports running:{' '}
+                <strong
+                  className={cn(
+                    usage.exports_concurrent_used >= usage.exports_concurrent_limit
+                      ? 'text-amber-300'
+                      : 'text-text-2',
+                  )}
+                >
+                  {usage.exports_concurrent_used}/{usage.exports_concurrent_limit}
+                </strong>
+                {usage.exports_concurrent_used >= usage.exports_concurrent_limit && (
+                  <span className="ml-1 text-amber-300">· limit reached</span>
+                )}
+              </div>
+              <div>
+                Uploads this hour:{' '}
+                <strong className="text-text-2">
+                  {usage.uploads_used}/{usage.uploads_limit}
+                </strong>
+              </div>
+            </>
+          ) : (
+            <div>
+              Your <strong className="text-text-2">{currentPlan}</strong> plan allows{' '}
+              <strong className="text-text-2">{PLAN_LIMITS[currentPlan].concurrentExports}</strong>{' '}
+              concurrent export{PLAN_LIMITS[currentPlan].concurrentExports > 1 ? 's' : ''}.
+            </div>
+          )}
+        </div>
 
         {/* Format */}
         <div className="mb-3">
@@ -152,10 +206,39 @@ export function ExportDialog(): React.ReactElement | null {
                 : 'bg-amber-500/10 border-amber-500/40 text-amber-300',
             )}
           >
-            <div className="font-semibold">Status: {job.status}</div>
-            {job.status === 'done' && job.output_key && (
-              <div className="opacity-80 break-all mt-0.5">{job.output_key}</div>
+            <div className="flex items-center justify-between font-semibold">
+              <span>Status: {job.status}</span>
+              {(job.status === 'queued' || job.status === 'processing') && (
+                <span className="font-mono text-[10px] opacity-80">{job.progress_pct}%</span>
+              )}
+            </div>
+
+            {/* Progress bar — visible while queued/processing */}
+            {(job.status === 'queued' || job.status === 'processing') && (
+              <div className="mt-1.5 h-1 overflow-hidden rounded-[1px] bg-black/20">
+                <div
+                  className="h-full bg-amber-300 transition-[width] duration-500 ease-linear"
+                  style={{ width: `${Math.max(2, job.progress_pct)}%` }}
+                />
+              </div>
             )}
+
+            {/* Download button — only when done */}
+            {job.status === 'done' && job.download_url && (
+              <a
+                href={job.download_url}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex items-center gap-1.5 rounded bg-emerald-500/20 px-2 py-1 text-[11px] font-semibold text-emerald-200 hover:bg-emerald-500/30"
+              >
+                ↓ Download {job.format.toUpperCase()} ({job.resolution}p)
+              </a>
+            )}
+            {job.status === 'done' && !job.download_url && job.output_key && (
+              <div className="opacity-80 break-all mt-0.5 font-mono text-[10px]">{job.output_key}</div>
+            )}
+
             {job.status === 'error' && job.error_msg && (
               <div className="opacity-80 mt-0.5">{job.error_msg}</div>
             )}

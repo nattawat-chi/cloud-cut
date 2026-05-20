@@ -42,6 +42,9 @@ pub struct UpdateProjectReq {
     pub description: Option<String>,
     pub duration_ms: Option<i64>,
     pub thumbnail_url: Option<String>,
+    pub fps: Option<i16>,
+    pub resolution_w: Option<i32>,
+    pub resolution_h: Option<i32>,
 }
 
 // ─── Pagination ───────────────────────────────────────────────────────────────

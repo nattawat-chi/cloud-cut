@@ -2,7 +2,7 @@ pub mod handlers;
 pub mod models;
 
 use axum::{
-    routing::get,
+    routing::{get, post},
     Router,
 };
 
@@ -23,4 +23,5 @@ pub fn router() -> Router<AppState> {
                 .patch(handlers::update_project)
                 .delete(handlers::archive_project),
         )
+        .route("/projects/:id/duplicate", post(handlers::duplicate_project))
 }

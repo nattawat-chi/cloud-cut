@@ -42,6 +42,26 @@ export function useKeyboardShortcuts(): void {
       if (cmd && e.key === '0') { e.preventDefault(); ui.zoomFit(); return; }
       if (cmd && (e.key === '+' || e.key === '=')) { e.preventDefault(); ui.zoomIn(); return; }
       if (cmd && e.key === '-') { e.preventDefault(); ui.zoomOut(); return; }
+      if (cmd && e.key.toLowerCase() === 'c') {
+        if (ui.selectedClipIds.length === 0) return;
+        e.preventDefault();
+        project.copyClips(ui.selectedClipIds);
+        return;
+      }
+      if (cmd && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        project.pasteClips();
+        return;
+      }
+      if (cmd && e.key.toLowerCase() === 'a') {
+        // Select-all: useful alongside copy/paste and Del. Skip when there
+        // are no clips so we don't fight the browser's text-select shortcut
+        // on non-editor surfaces.
+        if (project.clips.length === 0) return;
+        e.preventDefault();
+        ui.setSelection(project.clips.map((c) => c.id));
+        return;
+      }
       if (cmd) return; // ignore other cmd combos to avoid swallowing browser shortcuts
 
       // ── Single-key shortcuts ───────────────────────────────────────────

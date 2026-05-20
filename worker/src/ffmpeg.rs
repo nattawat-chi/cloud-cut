@@ -99,7 +99,7 @@ where
         "-i".to_owned(),
         input.to_string_lossy().into_owned(),
         "-vf".to_owned(),
-        "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease".to_owned(),
+        "scale=-2:720".to_owned(),
         "-c:v".to_owned(),
         "libx264".to_owned(),
         "-preset".to_owned(),
@@ -121,6 +121,22 @@ where
         output.to_string_lossy().into_owned(),
     ];
     run_ffmpeg_with_progress(&args, duration_ms, on_progress).await
+}
+
+/// Transcode an audio file to a normalised stereo 128 kbps AAC-in-MP4 proxy.
+/// The output file is browser-safe (all major browsers play audio/mp4 with AAC).
+pub async fn make_audio_proxy(input: &Path, output: &Path) -> Result<(), WorkerError> {
+    run_ffmpeg(&[
+        "-y",
+        "-i", input.to_str().unwrap(),
+        "-vn",          // strip video streams (cover art, etc.)
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-ac", "2",     // stereo
+        "-movflags", "+faststart",
+        output.to_str().unwrap(),
+    ])
+    .await
 }
 
 // ─── Thumbnail ────────────────────────────────────────────────────────────────
@@ -204,6 +220,9 @@ pub async fn make_waveform(input: &Path, output: &Path) -> Result<(), WorkerErro
 
 pub struct ExportSpec<'a> {
     pub clips: &'a [ClipSpec<'a>],
+    /// Clips on dedicated audio tracks (A1, A2…) — positioned by `pos_ms` via
+    /// `adelay` and mixed into the final audio output via `amix`.
+    pub audio_clips: &'a [AudioClipSpec<'a>],
     pub fps: u32,
     pub width: u32,
     pub height: u32,
@@ -219,34 +238,62 @@ pub struct ClipSpec<'a> {
     pub trim_in_ms: i64,
     pub speed: f64,
     pub filters: &'a str, // CSS-style filter string already converted to ffmpeg
+    /// True when the source file contains an audio stream. When false, the
+    /// audio chain falls back to `anullsrc` so concat=a=1 still succeeds.
+    pub has_audio: bool,
+}
+
+/// One clip on an audio track (A1, A2, …). Mixed into the final audio output
+/// via `adelay` (to its timeline position) + `amix` (with the video-track
+/// audio). Unlike `ClipSpec` there's no video chain — these are audio-only.
+pub struct AudioClipSpec<'a> {
+    pub local_path: &'a Path,
+    /// Timeline offset in milliseconds — clip starts here in the output.
+    pub pos_ms: i64,
+    pub dur_ms: i64,
+    pub trim_in_ms: i64,
+    pub speed: f64,
 }
 
 /// Build and run an ffmpeg filter-graph that composites timeline clips
 /// into a single output file.
-pub async fn export_timeline(spec: &ExportSpec<'_>) -> Result<(), WorkerError> {
+///
+/// Trim is done entirely by the `trim`/`atrim` filters (no `-ss` before `-i`).
+/// Mixing both caused double-trimming in the previous implementation — the
+/// input-seek shifted timestamps to 0 while the trim filter still used the
+/// original (pre-seek) range, so the output ended up empty or wrong.
+///
+/// `duration_ms` is the expected total output duration — used to compute the
+/// 0..100 progress percentage that ffmpeg writes to its `-progress` pipe.
+/// Pass `None` to skip progress reporting (no-op `on_progress`).
+pub async fn export_timeline<F, Fut>(
+    spec: &ExportSpec<'_>,
+    duration_ms: Option<i64>,
+    on_progress: F,
+) -> Result<(), WorkerError>
+where
+    F: Fn(i16) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send,
+{
     if spec.clips.is_empty() {
         return Err(WorkerError::Other("no clips to export".into()));
     }
 
-    // Build a concat filter: one segment per clip with trim + setpts
+    // Build a concat filter: one segment per clip with trim + setpts.
     let mut inputs: Vec<String> = Vec::new();
     let mut filter_parts: Vec<String> = Vec::new();
 
     for (i, clip) in spec.clips.iter().enumerate() {
         let trim_start = clip.trim_in_ms as f64 / 1000.0;
-        let trim_end = trim_start + (clip.dur_ms as f64 / 1000.0 / clip.speed);
+        let trim_end = trim_start + (clip.dur_ms as f64 / 1000.0 / clip.speed.max(0.01));
 
-        inputs.push(format!(
-            "-ss {:.3} -i {}",
-            trim_start,
-            clip.local_path.display()
-        ));
+        // No -ss before -i: the trim filter does the seek, so timestamps stay
+        // aligned with the original source.
+        inputs.push(format!("-i {}", clip.local_path.display()));
 
         let mut vf = format!(
-            "[{i}:v]trim={:.3}:{:.3},setpts=(PTS-STARTPTS)/{:.4},fps={fps}",
-            trim_start,
-            trim_end,
-            clip.speed,
+            "[{i}:v]trim={trim_start:.3}:{trim_end:.3},setpts=(PTS-STARTPTS)/{speed:.4},fps={fps}",
+            speed = clip.speed.max(0.01),
             fps = spec.fps,
         );
         if !clip.filters.is_empty() {
@@ -258,20 +305,76 @@ pub async fn export_timeline(spec: &ExportSpec<'_>) -> Result<(), WorkerError> {
             spec.width, spec.height
         ));
 
-        let af = format!(
-            "[{i}:a]atrim={:.3}:{:.3},asetpts=PTS-STARTPTS,atempo={:.4}[a{i}];",
-            trim_start, trim_end, clip.speed,
-        );
+        let af = if clip.has_audio {
+            format!(
+                "[{i}:a]atrim={trim_start:.3}:{trim_end:.3},asetpts=PTS-STARTPTS,atempo={speed:.4}[a{i}];",
+                speed = clip.speed.max(0.5).min(2.0), // atempo only accepts 0.5..2.0
+            )
+        } else {
+            // Source clip has no audio (e.g. silent screen recording). Generate
+            // a silent stereo track sized to the clip's *output* duration so the
+            // concat=a=1 demuxer still has a matching audio segment.
+            // `anullsrc` is a source filter (no input pad), so we don't reference
+            // [{i}:a] which would fail with "matches no streams".
+            let out_dur = (trim_end - trim_start) / clip.speed.max(0.01);
+            format!(
+                "anullsrc=channel_layout=stereo:sample_rate=44100,atrim=duration={out_dur:.3},asetpts=PTS-STARTPTS[a{i}];"
+            )
+        };
 
         filter_parts.push(vf);
         filter_parts.push(af);
     }
 
-    let n = spec.clips.len();
-    let v_labels: String = (0..n).map(|i| format!("[v{i}]")).collect::<Vec<_>>().join("");
-    let a_labels: String = (0..n).map(|i| format!("[a{i}]")).collect::<Vec<_>>().join("");
-    filter_parts.push(format!("{v_labels}concat=n={n}:v=1:a=0[vout];"));
-    filter_parts.push(format!("{a_labels}concat=n={n}:v=0:a=1[aout]"));
+    // ── Audio-track clips: register inputs + adelay to timeline position ──
+    let n_video = spec.clips.len();
+    let n_audio = spec.audio_clips.len();
+
+    for (j, aclip) in spec.audio_clips.iter().enumerate() {
+        // Push the audio file as ffmpeg input #(n_video + j) — the filter
+        // chain below references it as `[{n_video + j}:a]`.
+        inputs.push(format!("-i {}", aclip.local_path.display()));
+
+        let trim_start = aclip.trim_in_ms as f64 / 1000.0;
+        let trim_end =
+            trim_start + (aclip.dur_ms as f64 / 1000.0 / aclip.speed.max(0.01));
+        let input_idx = n_video + j;
+        let delay = aclip.pos_ms.max(0);
+
+        // adelay needs one value per channel — we standardise on stereo so
+        // pass `delay|delay`. atempo clamp matches the video-track audio path.
+        let speed = aclip.speed.max(0.5).min(2.0);
+        let af = format!(
+            "[{input_idx}:a]atrim={trim_start:.3}:{trim_end:.3},asetpts=PTS-STARTPTS,atempo={speed:.4},adelay={delay}|{delay}[aa{j}];",
+        );
+        filter_parts.push(af);
+    }
+
+    // ── Concat: video clips → [vout]; their per-clip audio → [a_video] ──
+    let v_labels: String = (0..n_video).map(|i| format!("[v{i}]")).collect::<Vec<_>>().join("");
+    let a_labels: String = (0..n_video).map(|i| format!("[a{i}]")).collect::<Vec<_>>().join("");
+    filter_parts.push(format!("{v_labels}concat=n={n_video}:v=1:a=0[vout];"));
+
+    // Decide the final audio label target. With no audio-track clips we go
+    // straight to [aout]; otherwise concat into an intermediate [a_video] and
+    // amix with the timeline audio clips below.
+    let video_audio_target = if n_audio == 0 { "aout" } else { "a_video" };
+    filter_parts.push(format!(
+        "{a_labels}concat=n={n_video}:v=0:a=1[{video_audio_target}]"
+    ));
+
+    // ── Mix video-track audio + all audio-track clips → [aout] ──
+    if n_audio > 0 {
+        filter_parts.push(";".into());
+        let aa_labels: String = (0..n_audio).map(|j| format!("[aa{j}]")).collect::<Vec<_>>().join("");
+        let total_inputs = 1 + n_audio;
+        // duration=first → output length follows [a_video] (= video duration),
+        // so an mp3 longer than the timeline gets trimmed cleanly.
+        // dropout_transition=0 disables amix's gain ramp when a stream ends.
+        filter_parts.push(format!(
+            "[a_video]{aa_labels}amix=inputs={total_inputs}:duration=first:dropout_transition=0[aout]"
+        ));
+    }
 
     let filter_complex = filter_parts.join("");
 
@@ -296,12 +399,14 @@ pub async fn export_timeline(spec: &ExportSpec<'_>) -> Result<(), WorkerError> {
         "-c:a".into(), codec_a.into(),
         "-b:a".into(), "192k".into(),
         "-movflags".into(), "+faststart".into(),
+        // Progress stream → stdout, machine-parseable key=value pairs
+        "-progress".into(), "pipe:1".into(),
+        "-nostats".into(),
         "-y".into(),
         spec.output.to_str().unwrap().to_owned(),
     ]);
 
-    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    run_ffmpeg(&arg_refs).await
+    run_ffmpeg_with_progress(&args, duration_ms, on_progress).await
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────

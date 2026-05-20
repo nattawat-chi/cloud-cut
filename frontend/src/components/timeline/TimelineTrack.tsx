@@ -2,12 +2,14 @@ import {
   EyeIcon,
   EyeOffIcon,
   LockIcon,
+  Trash2Icon,
   UnlockIcon,
   Volume2Icon,
   VolumeXIcon,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useProjectStore } from '@/state/projectStore';
 import type { Track } from '@/types';
 
@@ -22,10 +24,17 @@ interface TimelineTrackProps {
  */
 export function TimelineTrack({ track }: TimelineTrackProps) {
   const toggleTrack = useProjectStore((s) => s.toggleTrack);
+  const deleteTrack = useProjectStore((s) => s.deleteTrack);
+  const { canEditTimeline } = usePermissions();
+
+  const handleDelete = () => {
+    if (!window.confirm(`Delete "${track.label}" and all its clips?`)) return;
+    void deleteTrack(track.id);
+  };
 
   return (
     <div
-      className="relative flex items-center gap-2 border-b border-line bg-surface-1 px-2.5"
+      className="group relative flex items-center gap-2 border-b border-line bg-surface-1 px-2.5"
       style={{ height: 'var(--row-h)' }}
     >
       <div
@@ -73,6 +82,20 @@ export function TimelineTrack({ track }: TimelineTrackProps) {
         >
           {track.visible ? <EyeIcon size={11} /> : <EyeOffIcon size={11} />}
         </Toggle>
+        {canEditTimeline && (
+          <button
+            type="button"
+            title="Delete track"
+            onClick={handleDelete}
+            className={cn(
+              'invisible group-hover:visible',
+              'grid h-5 w-5 place-items-center rounded',
+              'text-text-4 hover:bg-surface-3 hover:text-status-danger',
+            )}
+          >
+            <Trash2Icon size={11} />
+          </button>
+        )}
       </div>
     </div>
   );

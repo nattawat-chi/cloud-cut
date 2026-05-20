@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { RemoteCursors } from '@/components/collaboration/RemoteCursors';
+import { RemoteCursors } from '@/collaboration/RemoteCursors';
+import { useViewportCursorBroadcast } from '@/collaboration/useViewportCursorBroadcast';
 import { PanelHead } from '@/components/shared/PanelHead';
+import { useAudioMixer } from '@/hooks/useAudioMixer';
 import { usePlaybackTicker } from '@/hooks/usePlaybackTicker';
 import { useAssetsStore } from '@/state/assetsStore';
 import { usePlaybackStore } from '@/state/playbackStore';
@@ -24,7 +26,9 @@ import { PlayerControls } from './PlayerControls';
  *   apply equally to real video and the mock composition.
  */
 export function VideoPlayer() {
-  usePlaybackTicker(); // mount-only — drives currentTimeMs when isPlaying.
+  usePlaybackTicker(); // drives currentTimeMs via RAF when isPlaying
+  useAudioMixer();    // drives hidden <audio> elements for audio-track clips
+  const cursorHandlers = useViewportCursorBroadcast();
 
   const clips = useProjectStore((s) => s.clips);
   const tracks = useProjectStore((s) => s.tracks);
@@ -97,7 +101,11 @@ export function VideoPlayer() {
   }, [volume, isMuted]);
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-surface-0">
+    <div
+      className="relative flex h-full min-h-0 flex-col bg-surface-0"
+      onMouseMove={cursorHandlers.onMouseMove}
+      onMouseLeave={cursorHandlers.onMouseLeave}
+    >
       <RemoteCursors />
       <PanelHead
         title="Preview"
@@ -140,7 +148,21 @@ export function VideoPlayer() {
               }}
             />
           ) : (
-            <MockFrame clip={clip} />
+            <>
+              <MockFrame clip={clip} />
+              {clip && asset && !asset.proxyUrl && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+                  <span
+                    className="rounded-full px-2.5 py-1 text-[10px] font-medium text-white/80"
+                    style={{ background: 'rgba(0,0,0,0.55)' }}
+                  >
+                    {asset.status === 'processing' || asset.status === 'uploading'
+                      ? 'Processing… preview unavailable'
+                      : 'Preview unavailable'}
+                  </span>
+                </div>
+              )}
+            </>
           )}
 
           {/* Safe area guide */}

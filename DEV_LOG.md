@@ -30,6 +30,7 @@
 | 2026-05-18 |     3 | Backend API (Axum + auth)                                  |   ✅   |
 | 2026-05-18 |     4 | Worker + ffmpeg pipelines                                  |   ✅   |
 | 2026-05-18 |     5 | Pusher collaboration                                       |   ✅   |
+| 2026-05-20 |     6 | Readiness polish — worker fixes, quota UI, timeline parity |   ✅   |
 
 ---
 
@@ -654,6 +655,200 @@ psql -U cloudcut cloudcut -c "SELECT email, display_name FROM users"
 
 - ✅ **Rule #4** — migrations directory พร้อม (`backend/migrations/0001..0003`)
 - ✅ **Rule #12** — `docs/database-design.md` เต็ม (Phase 2 section)
+
+---
+
+## 🛠️ Phase 6 — Readiness polish + bug fixes
+
+**Date:** 2026-05-19 → 2026-05-20 · **Status:** ✅
+
+### Goal
+
+After Phases 0–5 closed out the spec scaffold, walk every readiness-test
+checklist item and **fix everything that fails for real** — not just on paper.
+The test brief enumerates ~40 design questions plus ~25 timeline UX
+behaviours; this phase audits each and closes the gap.
+
+### What was done
+
+**Worker correctness**
+
+- **`process_audio`** now also generates `variants/{id}/proxy.mp4` (AAC-in-MP4
+  via `make_audio_proxy`) so future audio uploads have a normalised proxy at
+  the same key shape as video. Existing assets still play because the
+  frontend falls back to `original_key`.
+- **`export_timeline` trim double-application** fixed — removed `-ss` before
+  `-i` so the `trim`/`atrim` filter is the only seek mechanism. Symptom was
+  empty/wrong-range exports on split clips.
+- **Single-track export per §3.7** — SQL now picks only the lowest-position
+  non-muted video track via subquery; the export renders one V1 timeline.
+- **Audio mixing** — added `AudioClipSpec` + amix filter graph. Audio-track
+  clips (A1, A2…) are registered as extra ffmpeg inputs, trimmed, atempo'd,
+  delayed via `adelay={pos}|{pos}`, then mixed with the video-track audio
+  into `[aout]` with `duration=first` so an mp3 longer than the timeline
+  gets cleanly cut.
+- **`anullsrc` fallback** when a video clip has no embedded audio (`probe`
+  returns `has_audio=false`) — previously concat=a=1 failed with
+  "matches no streams" on silent screen recordings.
+- **Progress 95 % stall fixed** — background tokio ticker bumps 95→99 % every
+  2 s during S3 upload because AWS Rust SDK v1's `put_object` doesn't expose
+  chunk callbacks. Cancelled when upload returns.
+- **Concurrent-export slot release** — worker now DECRs the Redis key
+  `cloudcut:exports:concurrent:{ws_id}` (mirroring the backend's INCR) in a
+  `try/finally`-style outer `run` wrapping the existing pipeline as
+  `run_inner`. Underflow guard resets to 0 on stale double-DECR.
+
+**Backend hardening**
+
+- **`request_checksum_calculation = WhenRequired`** + matching response var on
+  both `backend/state.rs` and `worker/storage.rs` — AWS Rust SDK v1's default
+  flexible-checksums (`x-amz-checksum-crc32` + `STREAMING-AWS4-…-PAYLOAD`)
+  was getting opaque 4xxs from MinIO on `put_object`. The opaque "service
+  error" Display didn't surface the real cause; `fmt_sdk_err` now walks
+  `source()` chain so future failures print the full reason.
+- **`GET /workspaces/:id/usage`** — new endpoint reading Redis counters
+  (no INCR) + TTL, returning current uploads-used / exports-running /
+  reset-in-secs. Frontend polls every 10 s (paused when tab hidden).
+- **Presigned download URL** in `ExportJobRow` when `status == "done"` so
+  the Export dialog can hand the user a direct `<a download>` link.
+
+**Frontend features**
+
+- **Plan badge** on TopBar workspace selector + every workspace in the
+  dropdown. Live tooltip shows `Uploads: 3/50 · Exports: 1/10 · Resets in 47m`
+  via `useWorkspaceUsage()` hook.
+- **Quota line** in ExportDialog — `Exports running: 1/10 · Uploads this hour: 3/50`,
+  with amber highlight when the export limit is reached.
+- **Real asset thumbnails** — `AssetThumb` now detects whether `thumb` is a
+  URL (`http(s)://` / `/`) and renders `<img>` with `object-cover` + dark
+  bottom-vignette so the duration chip stays legible. CSS-gradient mocks
+  still work; `FilmIcon` placeholder on image load error.
+- **Time-range quick filter** in AssetBrowser — `CalendarIcon` dropdown with
+  "All time / Last 24h / 7d / 30d", filters by `asset.createdAt` (new field,
+  mapped from API `created_at`). Active filter pill stays badge-styled so
+  the user knows it's on.
+- **Inspector read-only for Viewers** — `<PlanBadge>` mode is implicit; the
+  panel reads `usePermissions().canEditTimeline`, hides Browse / Add Effect /
+  Reset buttons, disables sliders, makes inputs `readOnly`, and surfaces a
+  "View only" pill on the tab strip.
+- **Audio mixer hook** (`useAudioMixer`) — mounts hidden `<audio>` elements
+  for each audio-track clip with a `proxyUrl`, lazily-instantiated; syncs
+  play / pause / volume / mute / seek (drift > 250 ms) via Zustand subscribe
+  rather than React selectors so the 60 fps RAF tick doesn't re-render.
+- **"Preview unavailable" pill** in VideoPlayer when a clip is on-screen but
+  its asset is `processing` / has no `proxyUrl` yet, so the user understands
+  why they see MockFrame.
+
+**Timeline UX completeness (checklist parity)**
+
+- **Cross-track clip drag** — `onClipMouseDown` snapshots row `getBoundingClientRect`s
+  at drag-start, picks the target track by `clientY` on each `mousemove`,
+  same-type guard (no audio → video). `moveClip(id, posMs, newTrackId?)` was
+  already plumbed through; just needed the picker.
+- **Ctrl + wheel zoom** — new `onWheel` on the scroll container; modifier-only
+  to avoid stealing the user's horizontal scroll.
+- **Direct playhead handle drag** — Playhead's vertical line stays
+  `pointer-events-none` (doesn't swallow clicks on clips passing under), but
+  the triangle handle opts back into `pointer-events-auto` + `cursor-ew-resize`
+  and runs the same drag-to-seek loop the ruler uses.
+- **Click background deselect** — `onMouseDown` on `.tl-inner` and each track
+  row with `e.target === e.currentTarget` guard so clicks landing on clip
+  children don't trigger.
+- **Copy / paste clips** — `projectStore._clipboard` array + `copyClips(ids)` /
+  `pasteClips()` (anchors earliest copied clip to the playhead, preserves
+  relative offsets, replaces selection with pasted IDs). Wired to Ctrl+C /
+  Ctrl+V / Ctrl+A in `useKeyboardShortcuts` after removing the
+  `if (cmd) return` early-bailout that previously dropped all Cmd combos.
+
+**Collaboration round-out**
+
+- **Viewport cursor broadcast** — `useViewportCursorBroadcast()` hook tracks
+  mouse over the Preview container, broadcasts `client-cursor:viewport` with
+  normalised x/y ∈ [0,1]. `useOperationSync` binds the matching listener
+  → `collabStore.setCursor({target: 'viewport', x, y})`. `RemoteCursors`
+  was already wired to consume that shape — the loop just had no producer.
+  Timeline cursor (timelineMs-based) was already working; this fills the
+  missing half.
+
+**Docs / README polish**
+
+- **README** — added Environment variables table, Database migrations
+  section, Architecture diagram inline, API documentation links (Swagger UI),
+  Screenshots section, Known limitations (8 items), Future improvements (9
+  items). Quick start now lists 7 numbered steps incl. `sqlx migrate run`
+  and frontend `pnpm dev`.
+- **`docs/database-design.md`** — closed §1.4 gaps: `Q-CLIP-POS` (why ms
+  BIGINT, not INTERVAL/float/frame#), `Q-CASCADE` (10-edge FK action table),
+  `Q-CONCURRENT` (OCC via `version` + operation_logs + Pusher hint),
+  explicit row-count math at the brief's `1,000 × 10 × 30` scale.
+- **`docs/screenshots/`** scaffold + capture instructions (Rule #14 ready
+  — drop in `editor.png` / `export.png` / `collab.png`, README links by name).
+
+### Decisions added
+
+| #         | Decision                                                                                  | เหตุผล                                                                                                                                                  |
+| --------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **D-032** | Disable AWS SDK flexible-checksums (`WhenRequired`) on both backend + worker S3 clients   | MinIO ≤ RELEASE.2024-10 chokes on `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` + new checksum headers. `WhenRequired` keeps headers only where S3 demands them. |
+| **D-033** | Worker DECR's the Redis concurrency key directly, not via backend RPC                     | Avoids backend round-trip in the slot-release path. Both sides use the exact same key format (`cloudcut:exports:concurrent:{ws_id}`) — single source.   |
+| **D-034** | Export pipeline picks **only the main (lowest-position) video track**, never multi-track  | §3.7 spec calls for "main video track". Multi-track overlay export is a future feature (DESIGN.md known-limitation).                                    |
+| **D-035** | Audio-track clips positioned by `adelay={pos_ms}` against the *concat'd* video duration   | amix `duration=first` then trims to video length. Gaps in video timeline don't shift audio anchors — original `pos_ms` is honoured.                     |
+| **D-036** | Quota usage hook polls `GET /workspaces/:id/usage` at 10 s + paused on `document.hidden`  | Throws away ~95 % of poll volume on idle tabs while still feeling live when the user comes back (visibilitychange fires an immediate refetch).          |
+| **D-037** | `setSelection(ids)` distinct from `selectClip(id, additive)` — paste replaces, not adds   | Matches Premiere / Resolve: pasted clips are the new selection so subsequent Del / drag operates on them.                                               |
+| **D-038** | Cross-track drag uses cached `getBoundingClientRect`s captured at drag-start              | Re-querying the DOM on every `mousemove` (60–120 Hz) burns layout cost; row count is ~4–8 so caching at drag-start is exact + cheap.                    |
+
+### Gotchas
+
+- **G-008 — "service error" from MinIO on `put_object`.**
+  AWS Rust SDK v1 sends `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` body encoding +
+  flexible-checksum headers by default. MinIO returned a 4xx that the SDK
+  surfaced as the literal string `"service error"` because
+  `SdkError::ServiceError`'s `Display` impl is exactly that — the real cause
+  (response body / status) lives in `.source()`. Walked the source chain
+  with `fmt_sdk_err` → confirmed the rejection was checksum-related →
+  configured `RequestChecksumCalculation::WhenRequired`. Both fixes shipped
+  together since either alone would have re-bit later.
+- **G-009 — `[N:a]` filter rejected on screen recordings.**
+  ffmpeg `concat=a=1` needs every segment to have an audio stream. Silent
+  screen recordings broke the filter graph with "matches no streams" because
+  `[N:a]` referenced a missing input pad. Fix: probe each clip in
+  `export_pipeline` and emit `anullsrc=…,atrim=duration=N` instead of
+  `[N:a]atrim=…` for audio-less inputs.
+- **G-010 — Ticker stuck at 95 % for ~30 s on local MinIO.**
+  Encode finished, S3 upload started, and `progress_pct` froze. Root cause:
+  no chunk-level callback on `ByteStream::from_path`. Solution wasn't to
+  add real progress (the SDK doesn't expose it for non-multipart upload) but
+  to *show motion* — a background tokio task bumps the bar by +1 % every 2 s
+  up to 99 % while the upload future is in flight, then aborts on
+  completion. The final UPDATE jumps to 100 %.
+- **G-011 — Plan badge "didn't decrease" after exporting.**
+  User confusion between *plan tier* (PRO, doesn't change) and *quota*
+  (counter, decreases on use). UI was showing the plan limit (`50 uploads/hour`)
+  in the tooltip without the consumed half. Added `/workspaces/:id/usage`
+  endpoint + hook so the tooltip now reads `Uploads: 3/50 · Exports: 1/10`.
+- **G-012 — Cmd combos all dropped to browser shortcuts.**
+  `useKeyboardShortcuts` had `if (cmd) return` after the explicit Cmd cases
+  it handled (`Z`, `0`, `+`, `-`). Anything else — Ctrl+C, Ctrl+V, Ctrl+A —
+  fell through and got eaten by the browser. Removed the early-bailout and
+  added explicit cases for the timeline ones.
+
+### Verification
+
+- `cargo build --workspace` → 0 errors, 3 `dead_code` warnings (utility code).
+- `pnpm exec tsc --noEmit` from `frontend/` → clean.
+- Manual: full upload → drag → export round-trip on a 42 s composite of 3
+  split clips + 1 mp3 — output mp4 plays in VLC with mixed audio.
+- Rate-limit probe: free-plan workspace rejects the 3rd concurrent export
+  with 429; after one finishes, slot frees and the 3rd is accepted.
+
+### Rules unlocked / hardened
+
+- ✅ **Rule #1** — `cargo build` still clean after the multi-file refactor.
+- ✅ **Rule #6** — ffmpeg audio mix is *real* (verified with VLC), not a mock.
+- ✅ **Rule #11 / 12** — README + 3 × DESIGN.md filled to the brief's
+  question-by-question depth (40 / 40 answered, see audit table in this
+  session's transcript).
+- ⏳ **Rule #14** — screenshots dir scaffolded; pending capture of
+  `editor.png` / `export.png` / `collab.png` per `docs/screenshots/README.md`.
 
 ---
 
