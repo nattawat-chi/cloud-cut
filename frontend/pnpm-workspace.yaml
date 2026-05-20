@@ -1,2 +1,12 @@
+# pnpm v9+ requires `packages:` whenever this file exists, even though
+# frontend/ is effectively a single-package "workspace" (no children).
+# Listing "." keeps the local pnpm-side `allowBuilds` config working
+# without inventing a fake monorepo layout.
+packages:
+  - .
+
+# Allow esbuild's native postinstall — Vite needs it for its dev-server
+# binary. Without this entry pnpm@10+ silently skips the build and Vite
+# fails at runtime with "esbuild was not built correctly".
 allowBuilds:
   esbuild: true
