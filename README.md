@@ -74,12 +74,23 @@ docker compose up -d
 docker compose ps
 #   → all services should be `healthy` (minio-setup will exit 0 after seeding)
 
-# 4. Run the backend placeholder (Rule 2 — Phase 3 wires the real router)
+# 4. Apply database migrations (creates tables + seeds demo data)
+cargo install sqlx-cli --no-default-features --features postgres   # one-time
+sqlx migrate run --source backend/migrations \
+                 --database-url postgresql://cloudcut:cloudcut_dev@localhost:5432/cloudcut
+
+# 5. Run the backend in one terminal (Rule 2)
 cargo run -p backend
 
-# 5. Run the worker placeholder in another terminal (Rule 3)
+# 6. Run the worker in another terminal (Rule 3)
 cargo run -p worker
+
+# 7. Run the frontend in a third terminal
+cd frontend && pnpm install && pnpm dev
+#   → http://localhost:5173
 ```
+
+> Migrations are also auto-applied at backend startup via `sqlx::migrate!()` — step 4 is only needed for standalone setups (CI, fresh clones without the backend running).
 
 ### Service URLs (host-side)
 
@@ -91,6 +102,136 @@ cargo run -p worker
 | MinIO S3 API | http://localhost:9000 | cloudcut / cloudcut_dev_secret |
 | MinIO Console | http://localhost:9001 | cloudcut / cloudcut_dev_secret |
 | Frontend (Phase 1) | http://localhost:5173 | — |
+| Swagger UI (OpenAPI) | http://localhost:8080/swagger-ui | — |
+
+---
+
+## Environment variables
+
+`.env.example` holds the full template — copy it to `.env` and edit. Highlights:
+
+| Variable | Purpose | Notes |
+|---|---|---|
+| `DATABASE_URL` | Postgres connection string | host-mode uses `localhost:5432` |
+| `REDIS_URL` | Redis (queue + rate-limit counters) | `redis://localhost:6379` |
+| `S3_ENDPOINT` / `S3_BUCKET` / `S3_*_KEY` | MinIO/S3 object storage | dev creds: `cloudcut` / `cloudcut_dev_secret` |
+| `S3_PRESIGN_EXPIRES_SECS` | Presigned PUT/GET URL TTL | default `900` |
+| `S3_PUBLIC_URL` | Browser-facing bucket base URL | for thumbnails / proxy MP4s |
+| `JWT_SECRET` | HMAC-SHA256 signing key | **must be ≥ 32 bytes in prod** |
+| `JWT_ACCESS_EXP_SECS` / `JWT_REFRESH_EXP_SECS` | Token lifetimes | 15 min / 7 d |
+| `BACKEND_HOST` / `BACKEND_PORT` | Axum bind | default `0.0.0.0:8080` |
+| `RUST_LOG` | tracing filter | e.g. `backend=debug,sqlx=warn` |
+| `WORKER_CONCURRENCY` / `WORKER_MAX_RETRIES` | worker tuning | concurrent jobs + DLQ threshold |
+| `PUSHER_APP_ID` / `KEY` / `SECRET` / `CLUSTER` | Pusher Channels | **leave blank to disable** real-time — UI degrades gracefully |
+| `VITE_API_BASE` | Frontend → Backend prefix | proxied through Vite dev server |
+| `VITE_S3_PUBLIC_URL` | Frontend asset URL builder | must match `S3_PUBLIC_URL` |
+| `VITE_PUSHER_KEY` / `VITE_PUSHER_CLUSTER` | Frontend Pusher client | mirror of backend keys |
+
+---
+
+## Database migrations
+
+Migrations live in [`backend/migrations/`](backend/migrations/) (raw SQL, applied in numeric order):
+
+```bash
+# Apply migrations to a running Postgres
+sqlx migrate run --source backend/migrations \
+                 --database-url $DATABASE_URL
+
+# Roll back the most recent migration
+sqlx migrate revert --source backend/migrations \
+                    --database-url $DATABASE_URL
+```
+
+Schema rationale: [`docs/database-design.md`](docs/database-design.md).
+
+---
+
+## Architecture
+
+```
+                     ┌─────────────┐
+                     │  Browser    │  React 19 · Vite · shadcn/ui · Zustand
+                     └─────┬───────┘
+            REST + Pusher  │
+                           ▼
+                     ┌─────────────┐
+                     │  Backend    │  Rust · Axum · JWT · SQLx · utoipa
+                     │  (port 8080)│
+                     └──┬──────┬───┘
+              SQL       │      │ enqueue (XADD)
+                        ▼      ▼
+                ┌────────────┐ ┌──────────────┐
+                │ PostgreSQL │ │ Redis Streams│  rate-limit counters + DLQ
+                └────────────┘ └──────┬───────┘
+                                      │ XREADGROUP
+                                      ▼
+                              ┌──────────────┐
+                              │ Worker (Rust)│  ffmpeg CLI (probe/proxy/export)
+                              └──────┬───────┘
+                                     │ PUT / GET
+                                     ▼
+                              ┌──────────────┐
+                              │ MinIO / S3   │  originals/ + variants/ + exports/
+                              └──────────────┘
+```
+
+Full diagram + sequence flows: [`docs/architecture.md`](docs/architecture.md).
+
+---
+
+## API documentation
+
+The backend exposes an auto-generated OpenAPI 3 spec at runtime via **utoipa**:
+
+| URL | Purpose |
+|---|---|
+| http://localhost:8080/swagger-ui | Interactive Swagger UI — try endpoints directly |
+| http://localhost:8080/api-docs/openapi.json | Raw OpenAPI JSON for codegen / Postman import |
+
+Static reference: [`docs/api-spec.md`](docs/api-spec.md).
+
+---
+
+## Screenshots
+
+Live screenshots of the running editor are in [`docs/screenshots/`](docs/screenshots/).
+
+| | |
+|---|---|
+| Editor (timeline + preview + inspector) | ![editor](docs/screenshots/editor.png) |
+| Export dialog with live quota | ![export](docs/screenshots/export.png) |
+| Real-time collaboration (cursors + presence) | ![collab](docs/screenshots/collab.png) |
+
+Capture instructions are in [`docs/screenshots/README.md`](docs/screenshots/README.md).
+
+---
+
+## Known limitations
+
+- **Single-track export.** The worker renders clips from the lowest-`position` non-muted video track only. Overlay compositing (V2 on V1) is a future enhancement — the spec calls for "main video track" per §3.7.
+- **Audio mixing is best-effort.** Audio-track clips are mixed via ffmpeg `amix=duration=first`. Long audio that extends past the video gets cleanly trimmed; gain normalisation is automatic and not user-tunable yet.
+- **`ByteStream::from_path` upload, no chunk callbacks.** The worker bumps the export progress bar from 95 → 99 % via a time-based ticker during S3 PUT because the AWS Rust SDK doesn't expose per-chunk upload progress.
+- **Plan management is SQL-only.** No `PATCH /workspaces/:id/plan` endpoint or admin UI — change a workspace's tier with `UPDATE workspaces SET plan='pro' WHERE id=…`. Plan badge + live quota display *is* in the UI (topbar + Export dialog).
+- **Pusher client events require dashboard toggle.** Mouse-cursor broadcast uses `client-*` events; if the Pusher app has "Client events" off, cursor sharing silently no-ops (rest of collab still works via server-broadcast clip ops).
+- **Mock-data fallback when backend unreachable.** Boot-time API failure (no workspaces / 5xx) loads `MOCK_PROJECT`. The session is interactive but edits aren't persisted — useful for offline UI work, surprising if you forgot to start the backend.
+- **Concurrent-export slot can leak.** Mitigated by 24h Redis TTL; can leak by one slot if the worker hard-crashes between `release_export_slot` and Redis acknowledging the DECR. Safe in practice — TTL auto-recovers.
+- **Asset deletion blocked while referenced.** `DELETE /assets/:id` returns 409 if any clip on any project still references it. Caller has to remove clips first — no force-delete.
+
+---
+
+## Future improvements
+
+- **Multi-track export with overlay composition** — port the `clipAtTime` topmost-wins logic from the frontend into the ffmpeg filter graph (`overlay` + `enable='between(t,…)'`).
+- **Per-clip audio gain / mute** — currently track-level only.
+- **Owner-only plan management UI** — `PATCH /workspaces/:id/plan` + Settings dropdown. Stripe billing wiring as a stretch goal.
+- **Stripe self-serve billing** — checkout session → webhook → `UPDATE workspaces SET plan=…`. Already factored cleanly thanks to per-workspace plan column.
+- **Real-time playhead sync across collaborators** — `client-playhead:seek` is broadcast but receivers don't yet snap their own scrubber.
+- **Resumable uploads** — multipart S3 PUT with browser-side progress + retry. The current pre-signed single PUT works fine up to ~1 GB but stalls on flaky connections.
+- **Versioned timeline snapshots** — checkpoint a project every N ops so collaborators with stale state can rebase instead of pulling the whole `/timeline` payload.
+- **Pusher → Redis pubsub fallback** — for self-hosted demos where Pusher isn't available.
+- **Worker auto-scaling** — currently one worker process. Spec is ready for horizontal scale (consumer-group XREADGROUP), just needs an orchestrator.
+- **E2E tests via Playwright** — current tests are unit (Vitest) + integration (cargo `tests/`). A full upload→edit→export smoke test would close the loop.
 
 ---
 

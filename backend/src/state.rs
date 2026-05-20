@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use aws_credential_types::Credentials;
-use aws_sdk_s3::config::{BehaviorVersion, Region};
+use aws_sdk_s3::config::{
+    BehaviorVersion, Region, RequestChecksumCalculation, ResponseChecksumValidation,
+};
 use sqlx::PgPool;
 
 use crate::config::Config;
@@ -54,6 +56,11 @@ fn build_s3_client(config: &Config) -> aws_sdk_s3::Client {
         .region(Region::new(config.s3_region.clone()))
         // MinIO requires path-style addressing (bucket in path, not subdomain)
         .force_path_style(true)
+        // Disable flexible-checksum headers — see worker/src/storage.rs for
+        // the full explanation. Keeps the presigned URLs we hand to the
+        // browser interoperable with MinIO's checksum handling.
+        .request_checksum_calculation(RequestChecksumCalculation::WhenRequired)
+        .response_checksum_validation(ResponseChecksumValidation::WhenRequired)
         .build();
     aws_sdk_s3::Client::from_conf(s3_config)
 }

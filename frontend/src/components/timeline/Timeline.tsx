@@ -10,6 +10,9 @@ import { useUIStore } from '@/state/uiStore';
 import type { Clip, Track } from '@/types';
 import { msToPx, pxPerSec, pxToMs, snap as snapMath } from '@/utils/geometry';
 
+import { useCursorBroadcast } from '@/collaboration/useCursorBroadcast';
+import { usePermissions } from '@/hooks/usePermissions';
+
 import { Playhead } from './Playhead';
 import { TimelineClip } from './TimelineClip';
 import { TimelineRuler } from './TimelineRuler';
@@ -38,7 +41,9 @@ export function Timeline() {
   const trackPreset = useUIStore((s) => s.trackPreset);
   const selectedIds = useUIStore((s) => s.selectedClipIds);
   const selectClip = useUIStore((s) => s.selectClip);
+  const deselectAll = useUIStore((s) => s.deselectAll);
   const zoomLevel = useUIStore((s) => s.zoomLevel);
+  const setZoom = useUIStore((s) => s.setZoom);
   const snapEnabled = useUIStore((s) => s.snapEnabled);
   const activeTool = useUIStore((s) => s.activeTool);
   const clipStyle = useUIStore((s) => s.clipStyle);
@@ -51,6 +56,9 @@ export function Timeline() {
   const collaborators = useCollabStore((s) => s.collaborators);
 
   const pushHistory = useHistoryStore((s) => s.push);
+
+  const { onTimelineMouseMove, onTimelineMouseLeave } = useCursorBroadcast(zoomLevel);
+  const { canEditTimeline } = usePermissions();
 
   const pps = pxPerSec(zoomLevel);
   const pms = pps / 1000;
@@ -95,6 +103,7 @@ export function Timeline() {
     (e: React.MouseEvent, clip: Clip) => {
       e.preventDefault();
       selectClip(clip.id, e.shiftKey);
+      if (!canEditTimeline) return;
 
       // Blade tool replaces drag with split-on-click.
       if (activeTool === 'blade') {
@@ -113,6 +122,23 @@ export function Timeline() {
 
       const startX = e.clientX;
       const startPos = clip.posMs;
+      // Snapshot the visible rows' Y-ranges so we can pick the target track
+      // from the cursor's Y on every mousemove without re-querying the DOM.
+      const innerEl = scrollRef.current?.querySelector<HTMLDivElement>('.tl-inner');
+      const rows: Array<{ trackId: string; type: 'video' | 'audio'; top: number; bottom: number }> =
+        innerEl
+          ? Array.from(innerEl.querySelectorAll<HTMLElement>('[data-track-id]')).map((el) => {
+              const r = el.getBoundingClientRect();
+              return {
+                trackId: el.dataset.trackId!,
+                type: (el.dataset.trackType as 'video' | 'audio') ?? 'video',
+                top: r.top,
+                bottom: r.bottom,
+              };
+            })
+          : [];
+      const sourceTrack = tracks.find((t) => t.id === clip.trackId);
+      let currentTrackId = clip.trackId;
       let moved = false;
 
       const onMove = (ev: MouseEvent) => {
@@ -130,8 +156,24 @@ export function Timeline() {
           snappedTo = r.snappedTo;
         }
 
+        // Cross-track drop detection: pick the track row whose vertical band
+        // contains the cursor — but only allow same-type targets (video clip
+        // can't land on an audio track, etc.). Falls back to the original
+        // track when the cursor leaves the timeline.
+        let nextTrackId = currentTrackId;
+        for (const row of rows) {
+          if (ev.clientY >= row.top && ev.clientY < row.bottom) {
+            if (!sourceTrack || row.type === sourceTrack.type) {
+              nextTrackId = row.trackId;
+            }
+            break;
+          }
+        }
+        const trackChanged = nextTrackId !== currentTrackId;
+        currentTrackId = nextTrackId;
+
         setSnapLineX(snappedTo !== null ? msToPx(snappedTo, zoomLevel) : null);
-        moveClip(clip.id, newPos);
+        moveClip(clip.id, newPos, trackChanged ? nextTrackId : undefined);
         moved = true;
       };
 
@@ -147,7 +189,7 @@ export function Timeline() {
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [activeTool, clips, moveClip, pms, pushHistory, seek, selectClip, snapEnabled, snapshotNow, splitClipAt, zoomLevel],
+    [activeTool, canEditTimeline, clips, moveClip, pms, pushHistory, seek, selectClip, snapEnabled, snapshotNow, splitClipAt, tracks, zoomLevel],
   );
 
   // ── Drag: trim handles ─────────────────────────────────────────────────
@@ -155,6 +197,7 @@ export function Timeline() {
     (side: 'left' | 'right') =>
       (e: React.MouseEvent, clip: Clip) => {
         e.preventDefault();
+        if (!canEditTimeline) return;
         selectClip(clip.id);
         // Capture pre-trim state once so the whole trim drag is one undo step.
         snapshotNow();
@@ -188,7 +231,7 @@ export function Timeline() {
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
       },
-    [pms, pushHistory, resizeClip, selectClip, snapshotNow],
+    [canEditTimeline, pms, pushHistory, resizeClip, selectClip, snapshotNow],
   );
 
   const onTrimLeftMouseDown = useMemo(() => makeTrimHandler('left'), [makeTrimHandler]);
@@ -197,6 +240,7 @@ export function Timeline() {
   // ── Drop target: create a clip from an asset drag ──────────────────────
   const onRowDrop = (e: React.DragEvent, track: Track) => {
     e.preventDefault();
+    if (!canEditTimeline) return;
     const assetId = e.dataTransfer.getData('application/x-cloudcut-asset');
     if (!assetId) return;
     // Lookup goes through the live store (real assets from the backend) —
@@ -255,11 +299,39 @@ export function Timeline() {
           <div
             ref={scrollRef}
             onScroll={(e) => setScrollX(e.currentTarget.scrollLeft)}
+            onWheel={(e) => {
+              // Ctrl/Cmd + wheel: zoom around the cursor. Holding the modifier
+              // also tells the browser to suppress its native page-zoom
+              // behaviour via `preventDefault` (the React listener is passive
+              // by default — that's fine since we only call preventDefault on
+              // modified events, where we *do* want to swallow the scroll).
+              if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                // `deltaY > 0` = wheel-down = zoom out (matches Figma/Resolve).
+                if (e.deltaY < 0) {
+                  setZoom(Math.min(8, zoomLevel * 1.1));
+                } else if (e.deltaY > 0) {
+                  setZoom(Math.max(0.25, zoomLevel / 1.1));
+                }
+              }
+              // Without modifier: let the native horizontal scroll do its job.
+            }}
             className="relative flex-1 overflow-x-auto overflow-y-hidden"
           >
             <div
               className="tl-inner relative h-full"
               style={{ width: contentWidth, minWidth: '100%' }}
+              onMouseMove={onTimelineMouseMove}
+              onMouseLeave={onTimelineMouseLeave}
+              onMouseDown={(e) => {
+                // Click background (not a clip / trim handle / playhead) →
+                // clear the selection. We check the target's classList for
+                // the row container's marker class so clicks landing on a
+                // child element (a clip) still escape this handler.
+                if (e.target === e.currentTarget && !e.shiftKey) {
+                  deselectAll();
+                }
+              }}
             >
               <TimelineRuler widthPx={contentWidth} zoomLevel={zoomLevel} scrollX={scrollX} />
 
@@ -273,8 +345,19 @@ export function Timeline() {
                   return (
                     <div
                       key={tr.id}
+                      data-track-id={tr.id}
+                      data-track-type={tr.type}
                       className="cc-row-grid relative border-b border-line"
                       style={{ height: 'var(--row-h)' }}
+                      onMouseDown={(e) => {
+                        // Clicking the row's *background* (not a clip) clears
+                        // the selection — same UX as Premiere / Resolve.
+                        // Clips stop propagation in their own mousedown, so
+                        // we only see clicks that landed on empty row space.
+                        if (e.target === e.currentTarget && !e.shiftKey) {
+                          deselectAll();
+                        }
+                      }}
                       onDragOver={(e) => {
                         e.preventDefault();
                         e.dataTransfer.dropEffect = 'copy';
@@ -320,11 +403,12 @@ export function Timeline() {
                 />
               )}
 
-              {/* Remote collab cursors anchored to a timeline timecode. */}
+              {/* Remote collab cursors (mouse hover position on timeline). */}
               {showPresence &&
                 Object.entries(cursors).map(([uid, cu]) => {
                   if (cu.target !== 'timeline' || !cu.visible || cu.timelineMs == null) return null;
-                  const collab = collaborators.find((c) => c.name === cu.label);
+                  const collab = collaborators.find((c) => c.id === uid);
+                  const color = collab?.color ?? 'var(--collab-1)';
                   return (
                     <div
                       key={uid}
@@ -332,15 +416,57 @@ export function Timeline() {
                       style={{
                         left: msToPx(cu.timelineMs, zoomLevel),
                         width: 1.5,
-                        background: collab?.color ?? 'var(--collab-1)',
-                        transition: 'left 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                        background: color,
+                        transition: 'left 0.12s linear',
                       }}
                     >
                       <div
                         className="absolute -top-0.5 left-0.5 whitespace-nowrap rounded-r-sm px-1.5 py-px text-[9.5px] font-semibold text-white"
-                        style={{ background: collab?.color ?? 'var(--collab-1)' }}
+                        style={{ background: color }}
                       >
                         {cu.label}
+                      </div>
+                    </div>
+                  );
+                })}
+
+              {/* Remote playheads — where each collaborator's transport head is. */}
+              {showPresence &&
+                Object.entries(cursors).map(([uid, cu]) => {
+                  if (cu.playheadMs == null) return null;
+                  const collab = collaborators.find((c) => c.id === uid);
+                  if (!collab) return null;
+                  const left = msToPx(cu.playheadMs, zoomLevel);
+                  return (
+                    <div
+                      key={`rph-${uid}`}
+                      className="pointer-events-none absolute top-0 bottom-0 z-[4]"
+                      style={{
+                        left,
+                        width: 1.5,
+                        background: collab.color,
+                        opacity: 0.75,
+                        transition: 'left 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+                      }}
+                    >
+                      {/* Triangle handle */}
+                      <div
+                        className="absolute"
+                        style={{
+                          top: 0,
+                          left: -6,
+                          width: 13,
+                          height: 10,
+                          background: collab.color,
+                          clipPath: 'polygon(0 0, 100% 0, 50% 100%)',
+                        }}
+                      />
+                      {/* Name badge below the triangle */}
+                      <div
+                        className="absolute whitespace-nowrap rounded-r-sm px-1.5 py-px text-[9px] font-semibold text-white"
+                        style={{ top: 11, left: 1, background: collab.color }}
+                      >
+                        {collab.name}
                       </div>
                     </div>
                   );

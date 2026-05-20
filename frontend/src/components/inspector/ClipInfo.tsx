@@ -9,6 +9,7 @@ import { SliderRow } from './SliderRow';
 interface ClipInfoProps {
   clip: Clip;
   asset: Asset | undefined;
+  readOnly?: boolean;
 }
 
 /**
@@ -16,12 +17,12 @@ interface ClipInfoProps {
  * (uncontrolled today; wired to `projectStore.updateClipTransform` in
  * Phase 1.6+ when drag-on-canvas lands).
  */
-export function ClipInfo({ clip, asset }: ClipInfoProps) {
+export function ClipInfo({ clip, asset, readOnly = false }: ClipInfoProps) {
   return (
     <div className="flex-1 overflow-y-auto px-3.5 pb-10 pt-3">
       <Section title="Clip">
         <Row label="Name">
-          <Input defaultValue={clip.name} />
+          <Input defaultValue={clip.name} readOnly={readOnly} disabled={readOnly} />
         </Row>
         <Row label="Source">
           <div className="flex items-center gap-1.5 text-[11px] text-text-2">
@@ -35,36 +36,38 @@ export function ClipInfo({ clip, asset }: ClipInfoProps) {
           </div>
         </Row>
         <Row label="Position">
-          <Input mono defaultValue={`${(clip.posMs / 1000).toFixed(2)}s`} />
+          <Input mono defaultValue={`${(clip.posMs / 1000).toFixed(2)}s`} readOnly disabled={readOnly} />
         </Row>
         <Row label="Duration">
-          <Input mono defaultValue={`${(clip.durMs / 1000).toFixed(2)}s`} />
+          <Input mono defaultValue={`${(clip.durMs / 1000).toFixed(2)}s`} readOnly disabled={readOnly} />
         </Row>
         <Row label="In">
-          <Input mono defaultValue={fmtTC(clip.inPointMs)} />
+          <Input mono defaultValue={fmtTC(clip.inPointMs)} readOnly disabled={readOnly} />
         </Row>
         <Row label="Out">
-          <Input mono defaultValue={fmtTC(clip.outPointMs)} />
+          <Input mono defaultValue={fmtTC(clip.outPointMs)} readOnly disabled={readOnly} />
         </Row>
       </Section>
 
       <Section
         title="Transform"
         tools={
-          <button
-            type="button"
-            className="rounded px-1.5 text-[10px] text-text-3 hover:bg-surface-3 hover:text-text-1"
-            style={{ height: 20 }}
-          >
-            Reset
-          </button>
+          !readOnly ? (
+            <button
+              type="button"
+              className="rounded px-1.5 text-[10px] text-text-3 hover:bg-surface-3 hover:text-text-1"
+              style={{ height: 20 }}
+            >
+              Reset
+            </button>
+          ) : undefined
         }
       >
-        <SliderRow label="X"        min={-1000} max={1000} step={1}    init={clip.transform.x}        unit="px" />
-        <SliderRow label="Y"        min={-1000} max={1000} step={1}    init={clip.transform.y}        unit="px" />
-        <SliderRow label="Scale"    min={0.1}   max={3}    step={0.01} init={clip.transform.scale}    unit="×"  />
-        <SliderRow label="Rotation" min={-180}  max={180}  step={1}    init={clip.transform.rotation} unit="°"  />
-        <SliderRow label="Opacity"  min={0}     max={1}    step={0.01} init={clip.transform.opacity}            />
+        <SliderRow label="X"        min={-1000} max={1000} step={1}    init={clip.transform.x}        unit="px" disabled={readOnly} />
+        <SliderRow label="Y"        min={-1000} max={1000} step={1}    init={clip.transform.y}        unit="px" disabled={readOnly} />
+        <SliderRow label="Scale"    min={0.1}   max={3}    step={0.01} init={clip.transform.scale}    unit="×"  disabled={readOnly} />
+        <SliderRow label="Rotation" min={-180}  max={180}  step={1}    init={clip.transform.rotation} unit="°"  disabled={readOnly} />
+        <SliderRow label="Opacity"  min={0}     max={1}    step={0.01} init={clip.transform.opacity}            disabled={readOnly} />
       </Section>
     </div>
   );
@@ -111,6 +114,7 @@ function Input({ mono, ...props }: React.InputHTMLAttributes<HTMLInputElement> &
         'h-6 w-full rounded-sm border border-line bg-surface-2 px-1.5 text-[11px] text-text-1 outline-none',
         'focus:border-accent',
         mono && 'font-mono',
+        (props.disabled || props.readOnly) && 'cursor-default opacity-60 focus:border-line',
         props.className,
       )}
     />

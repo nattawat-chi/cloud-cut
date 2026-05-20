@@ -54,6 +54,8 @@ export interface Asset {
   thumb?: string;
   /** Playable proxy URL — `<video src>` for video/audio when status is "ready". */
   proxyUrl?: string;
+  /** ISO-8601 timestamp from the backend. Used by the time-range quick filter. */
+  createdAt?: string;
 }
 
 // ── Clips ───────────────────────────────────────────────────────────────────
@@ -136,8 +138,10 @@ export interface CursorState {
   /** Viewport target: ratios 0–1. Optional because timeline cursors don't use them. */
   x?: number;
   y?: number;
-  /** Timeline target: position in ms along the timeline. */
+  /** Timeline target: position in ms along the timeline (mouse hover). */
   timelineMs?: number;
+  /** Remote playhead position in ms — where this user's transport head is. */
+  playheadMs?: number;
   visible: boolean;
   label: string;
   editingClipId: UUID | null;

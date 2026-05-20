@@ -153,8 +153,40 @@ export interface WorkspaceResponse {
   readonly created_at: string;
 }
 
+export interface WorkspaceMember {
+  readonly user_id: string;
+  readonly display_name: string;
+  readonly email: string;
+  readonly avatar_url: string | null;
+  readonly role: string;
+  readonly joined_at: string;
+}
+
+export interface WorkspaceUsageResponse {
+  readonly plan: 'free' | 'pro' | 'team';
+  readonly uploads_used: number;
+  readonly uploads_limit: number;
+  readonly uploads_reset_in_secs: number;
+  readonly exports_concurrent_used: number;
+  readonly exports_concurrent_limit: number;
+}
+
 export const workspaces = {
   list: () => request<WorkspaceResponse[]>('GET', '/workspaces'),
+  create: (name: string) =>
+    request<{ id: string; name: string; plan: string; owner_id: string; created_at: string }>(
+      'POST', '/workspaces', { name },
+    ),
+  getUsage: (workspaceId: string) =>
+    request<WorkspaceUsageResponse>('GET', `/workspaces/${workspaceId}/usage`),
+  listMembers: (workspaceId: string) =>
+    request<WorkspaceMember[]>('GET', `/workspaces/${workspaceId}/members`),
+  invite: (workspaceId: string, email: string, role: string) =>
+    request<void>('POST', `/workspaces/${workspaceId}/invite`, { email, role }),
+  updateRole: (workspaceId: string, userId: string, role: string) =>
+    request<void>('PATCH', `/workspaces/${workspaceId}/members/${userId}`, { role }),
+  removeMember: (workspaceId: string, userId: string) =>
+    request<void>('DELETE', `/workspaces/${workspaceId}/members/${userId}`),
 };
 
 // ─── Projects ────────────────────────────────────────────────────────────────
@@ -183,8 +215,11 @@ export const projects = {
     );
   },
   get: (id: string) => request<ProjectResponse>('GET', `/projects/${id}`),
-  create: (workspaceId: string, body: { name: string; description?: string }) =>
+  create: (workspaceId: string, body: { name: string; description?: string; fps?: number; resolution_w?: number; resolution_h?: number }) =>
     request<ProjectResponse>('POST', `/workspaces/${workspaceId}/projects`, body),
+  update: (id: string, body: { name?: string; fps?: number; resolution_w?: number; resolution_h?: number }) =>
+    request<ProjectResponse>('PATCH', `/projects/${id}`, body),
+  archive: (id: string) => request<void>('DELETE', `/projects/${id}`),
 };
 
 // ─── Timeline ────────────────────────────────────────────────────────────────
@@ -230,6 +265,12 @@ export interface TimelineSnapshot {
   readonly clips: ClipResponse[];
   readonly effects: Record<string, EffectResponse[]>;
 }
+
+export const tracks = {
+  create: (projectId: string, body: { name: string; kind: string }) =>
+    request<TrackResponse>('POST', `/projects/${projectId}/tracks`, body),
+  delete: (trackId: string) => request<void>('DELETE', `/tracks/${trackId}`),
+};
 
 export const timeline = {
   get: (projectId: string) => request<TimelineSnapshot>('GET', `/projects/${projectId}/timeline`),
@@ -297,6 +338,8 @@ export interface ExportJobResponse {
   readonly output_key: string | null;
   readonly progress_pct: number;
   readonly error_msg: string | null;
+  /** Presigned GET URL — present only when status === "done". */
+  readonly download_url?: string | null;
 }
 
 export const exports_ = {

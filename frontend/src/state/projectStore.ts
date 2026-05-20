@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 
-import { projects as projectsApi, timeline as timelineApi } from '@/services/api';
+import { projects as projectsApi, timeline as timelineApi, tracks as tracksApi, workspaces as workspacesApi } from '@/services/api';
+import { usePlaybackStore } from '@/state/playbackStore';
+import { useUIStore } from '@/state/uiStore';
 import type {
   Clip,
   ClipEffect,
@@ -34,6 +36,23 @@ interface ProjectSnapshot {
   readonly effects: Readonly<Record<UUID, readonly ClipEffect[]>>;
 }
 
+export type ProjectRole = 'owner' | 'admin' | 'editor' | 'viewer';
+export type WorkspacePlan = 'free' | 'pro' | 'team';
+
+export interface WorkspaceSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly role: ProjectRole;
+  readonly plan: WorkspacePlan;
+}
+
+export interface ProjectSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly fps: number;
+  readonly resolution: string;
+}
+
 export interface ProjectState {
   project: Project | null;
   tracks: readonly Track[];
@@ -44,6 +63,35 @@ export interface ProjectState {
   _undoStack: readonly ProjectSnapshot[];
   /** Redo stack — populated when undo runs. Cleared on any new mutation. */
   _redoStack: readonly ProjectSnapshot[];
+  /** Current user's role in this project's workspace. Null until loaded. */
+  myRole: ProjectRole | null;
+  setMyRole: (role: string | null) => void;
+
+  /** Workspace + project switching state. */
+  currentWorkspaceId: string | null;
+  availableWorkspaces: readonly WorkspaceSummary[];
+  availableProjects: readonly ProjectSummary[];
+
+  /** Fetch the user's workspaces and store summaries in `availableWorkspaces`. */
+  refreshWorkspaces: () => Promise<void>;
+  /** Fetch the projects in `workspaceId` and store summaries in `availableProjects`. */
+  refreshProjects: (workspaceId: string) => Promise<void>;
+  /** Switch to a different workspace — updates role, fetches its projects, and loads the first one. */
+  selectWorkspace: (workspaceId: string) => Promise<void>;
+  /** Load a different project within the current workspace. */
+  selectProject: (projectId: string) => Promise<void>;
+  /** Create a new project in the given workspace and switch to it. */
+  createProject: (workspaceId: string, name: string, fps?: number, resW?: number, resH?: number) => Promise<void>;
+  /** Update the current project's name and/or video settings. */
+  updateProject: (patch: { name?: string; fps?: number; resW?: number; resH?: number }) => Promise<void>;
+  /** Create a new workspace, switch to it, and create a default project. */
+  createWorkspace: (name: string) => Promise<void>;
+  /** Add a new track to the current project and reload the timeline. */
+  addTrack: (kind: 'video' | 'audio', name: string) => Promise<void>;
+  /** Delete a track (and all its clips) from the current project. */
+  deleteTrack: (trackId: UUID) => Promise<void>;
+  /** Archive (soft-delete) a project and switch to the next available one. */
+  archiveProject: (projectId: string) => Promise<void>;
 
   /** Pop the latest snapshot and restore it. No-op when stack is empty.
    *  Returns true if anything was reverted. */
@@ -84,6 +132,20 @@ export interface ProjectState {
   resizeClip: (clipId: UUID, newPosMs: number, newDurMs: number) => void;
   splitClipAt: (clipId: UUID, atMs: number) => void;
   deleteClips: (clipIds: readonly UUID[]) => void;
+  /**
+   * Clipboard for clip copy/paste. Snapshot-only — the array stores the
+   * Clip shape at copy time so subsequent edits to the source clips don't
+   * mutate what will get pasted.
+   */
+  _clipboard: readonly Clip[];
+  /** Copy the given clips into the in-memory clipboard. */
+  copyClips: (clipIds: readonly UUID[]) => void;
+  /**
+   * Paste clipboard contents at the current playhead. The earliest-starting
+   * clip lands at the playhead; the rest preserve their *relative* offsets.
+   * Returns the new clip IDs so the caller can re-select them.
+   */
+  pasteClips: () => readonly UUID[];
 
   // ── Effects ───────────────────────────────────────────────────────────────
   addEffect: (clipId: UUID, type: EffectType) => void;
@@ -134,6 +196,8 @@ function pushSnapshot(s: ProjectState): Pick<ProjectState, '_undoStack' | '_redo
   };
 }
 
+const VALID_ROLES = new Set<ProjectRole>(['owner', 'admin', 'editor', 'viewer']);
+
 export const useProjectStore = create<ProjectState>()((set, get) => ({
   project: null,
   tracks: [],
@@ -141,6 +205,141 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   effects: {},
   _undoStack: [],
   _redoStack: [],
+  _clipboard: [],
+  myRole: null,
+  currentWorkspaceId: null,
+  availableWorkspaces: [],
+  availableProjects: [],
+
+  setMyRole: (role) =>
+    set({ myRole: role && VALID_ROLES.has(role as ProjectRole) ? (role as ProjectRole) : null }),
+
+  refreshWorkspaces: async () => {
+    const ws = await workspacesApi.list();
+    const VALID_PLANS = new Set<WorkspacePlan>(['free', 'pro', 'team']);
+    set({
+      availableWorkspaces: ws.map((w) => ({
+        id: w.id,
+        name: w.name,
+        role: (VALID_ROLES.has(w.role as ProjectRole) ? w.role : 'viewer') as ProjectRole,
+        plan: (VALID_PLANS.has(w.plan as WorkspacePlan) ? w.plan : 'free') as WorkspacePlan,
+      })),
+    });
+  },
+
+  refreshProjects: async (workspaceId) => {
+    const list = await projectsApi.list(workspaceId);
+    set({
+      availableProjects: list.items.map((p) => ({
+        id: p.id,
+        name: p.name,
+        fps: p.fps,
+        resolution: `${p.resolution_w}×${p.resolution_h}`,
+      })),
+    });
+  },
+
+  selectWorkspace: async (workspaceId) => {
+    const s = get();
+    const ws = s.availableWorkspaces.find((w) => w.id === workspaceId);
+    if (!ws) return;
+    set({ currentWorkspaceId: workspaceId, myRole: ws.role });
+    await s.refreshProjects(workspaceId);
+    const first = get().availableProjects[0];
+    if (first) await s.loadProjectFromApi(first.id);
+  },
+
+  selectProject: async (projectId) => {
+    await get().loadProjectFromApi(projectId);
+  },
+
+  createProject: async (workspaceId, name, fps = 30, resW = 1920, resH = 1080) => {
+    const created = await projectsApi.create(workspaceId, {
+      name,
+      fps,
+      resolution_w: resW,
+      resolution_h: resH,
+    });
+    // Auto-create one video and one audio track so the editor isn't blank.
+    await Promise.all([
+      tracksApi.create(created.id, { name: 'Video 1', kind: 'video' }),
+      tracksApi.create(created.id, { name: 'Audio 1', kind: 'audio' }),
+    ]);
+    await get().refreshProjects(workspaceId);
+    await get().loadProjectFromApi(created.id);
+  },
+
+  updateProject: async ({ name, fps, resW, resH }) => {
+    const projectId = get().project?.id;
+    const wsId = get().currentWorkspaceId;
+    if (!projectId) return;
+    const updated = await projectsApi.update(projectId, {
+      name,
+      fps: fps !== undefined ? fps : undefined,
+      resolution_w: resW,
+      resolution_h: resH,
+    });
+    const resolution = `${updated.resolution_w}×${updated.resolution_h}`;
+    set((s) => ({
+      project: s.project
+        ? { ...s.project, name: updated.name, fps: updated.fps, resolution }
+        : null,
+      availableProjects: s.availableProjects.map((p) =>
+        p.id === projectId ? { ...p, name: updated.name, fps: updated.fps, resolution } : p,
+      ),
+    }));
+    if (wsId) await get().refreshProjects(wsId);
+  },
+
+  createWorkspace: async (name) => {
+    const ws = await workspacesApi.create(name);
+    await get().refreshWorkspaces();
+    // New workspace = caller is owner.
+    set({ currentWorkspaceId: ws.id, myRole: 'owner', availableProjects: [] });
+    // Auto-create a starter project so the editor has something to render.
+    await get().createProject(ws.id, 'Untitled Project');
+  },
+
+  addTrack: async (kind, name) => {
+    const projectId = get().project?.id;
+    if (!projectId) return;
+    await tracksApi.create(projectId, { name, kind });
+    await get().loadProjectFromApi(projectId);
+  },
+
+  deleteTrack: async (trackId) => {
+    // Optimistic: remove track + all its clips from local state immediately.
+    set((s) => {
+      const clipIds = new Set(s.clips.filter((c) => c.trackId === trackId).map((c) => c.id));
+      const nextEffects = { ...s.effects };
+      for (const id of clipIds) delete nextEffects[id];
+      return {
+        ...pushSnapshot(s),
+        tracks: s.tracks.filter((t) => t.id !== trackId),
+        clips: s.clips.filter((c) => c.trackId !== trackId),
+        effects: nextEffects,
+      };
+    });
+    try {
+      await tracksApi.delete(trackId);
+    } catch (e) {
+      console.warn('deleteTrack persist failed — rolling back:', e);
+      useProjectStore.getState().undoLocal();
+    }
+  },
+
+  archiveProject: async (projectId) => {
+    await projectsApi.archive(projectId);
+    const wsId = get().currentWorkspaceId;
+    if (!wsId) return;
+    await get().refreshProjects(wsId);
+    const next = get().availableProjects.find((p) => p.id !== projectId);
+    if (next) {
+      await get().loadProjectFromApi(next.id);
+    } else {
+      set({ project: null, tracks: [], clips: [], effects: {}, _undoStack: [], _redoStack: [] });
+    }
+  },
 
   canUndoLocal: () => get()._undoStack.length > 0,
 
@@ -453,25 +652,83 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   },
 
   deleteClips: (clipIds) => {
+    // Only operate on clips that actually exist in current local state.
+    // This prevents duplicate API calls when Del is pressed multiple times
+    // (after the first press the clips are already gone from state — the
+    // second press would otherwise still fire DELETEs for the same IDs).
+    const drop = new Set(clipIds);
+    let toDelete: UUID[] = [];
+
     set((s) => {
-      const drop = new Set(clipIds);
       if (drop.size === 0) return {};
+      toDelete = s.clips.filter((c) => drop.has(c.id)).map((c) => c.id);
+      if (toDelete.length === 0) return {};
       const nextEffects = { ...s.effects };
-      for (const id of drop) delete nextEffects[id];
+      for (const id of toDelete) delete nextEffects[id];
       return {
         ...pushSnapshot(s),
         clips: s.clips.filter((c) => !drop.has(c.id)),
         effects: nextEffects,
       };
     });
-    // Fire-and-forget DELETEs in parallel. Temp-id clips don't have a server
-    // row yet (addClip may still be in flight) — skip them.
-    for (const id of clipIds) {
+
+    // Clear selection immediately so pressing Del again doesn't re-target
+    // the same (now-deleted) clip IDs.
+    if (toDelete.length > 0) {
+      useUIStore.getState().deselectAll();
+    }
+
+    // Fire-and-forget DELETEs — only for clips that existed locally.
+    // Temp-id clips don't have a server row yet; skip them.
+    for (const id of toDelete) {
       if (id.startsWith('c-tmp')) continue;
       void timelineApi
         .deleteClip(id)
         .catch((e) => console.warn(`deleteClip(${id}) persist failed:`, e));
     }
+  },
+
+  copyClips: (clipIds) => {
+    const ids = new Set(clipIds);
+    if (ids.size === 0) return;
+    // Snapshot — store a deep-enough copy so subsequent edits to source clips
+    // don't bleed into what the user later pastes. `Clip` already has only
+    // primitive/JSON values plus a `transform` sub-object, so a shallow copy
+    // of the array + spread of each clip is sufficient.
+    const snapshot = get()
+      .clips
+      .filter((c) => ids.has(c.id))
+      .map((c) => ({ ...c, transform: { ...c.transform } }));
+    set({ _clipboard: snapshot });
+  },
+
+  pasteClips: () => {
+    const clipboard = get()._clipboard;
+    if (clipboard.length === 0) return [];
+
+    // Anchor the earliest copied clip to the playhead so the *relative*
+    // arrangement of multi-clip selections is preserved. Single clips
+    // therefore paste exactly at the playhead.
+    const playhead = usePlaybackStore.getState().currentTimeMs;
+    const minPos = clipboard.reduce((m, c) => Math.min(m, c.posMs), Infinity);
+    const offset = playhead - minPos;
+
+    const newIds: UUID[] = [];
+    for (const src of clipboard) {
+      const newId = get().addClip({
+        trackId: src.trackId,
+        assetId: src.assetId,
+        posMs: src.posMs + offset,
+        durMs: src.durMs,
+        name: src.name,
+        thumbs: src.thumbs,
+      });
+      newIds.push(newId);
+    }
+    // Replace selection with the freshly-pasted clips so subsequent Del / drag
+    // operates on the paste, not the original. (Mirrors Premiere / Resolve.)
+    useUIStore.getState().setSelection(newIds);
+    return newIds;
   },
 
   addEffect: (clipId, type) =>

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  CalendarIcon,
+  ChevronDownIcon,
   FilmIcon,
   ImageIcon,
   MusicIcon,
@@ -12,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { PanelHead } from '@/components/shared/PanelHead';
 import { useAssetUpload } from '@/hooks/useAssetUpload';
 import { useAssetsHydration } from '@/hooks/useAssetsHydration';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAssetsStore } from '@/state/assetsStore';
 import { useProjectStore } from '@/state/projectStore';
 import { useUIStore } from '@/state/uiStore';
@@ -34,13 +37,28 @@ const SORT_OPTIONS: ReadonlyArray<{ id: SortMode; label: string }> = [
   { id: 'size', label: 'Size (largest)' },
 ];
 
+/**
+ * Quick filter by upload time. Windows are evaluated against `asset.createdAt`
+ * — assets without a timestamp (e.g. mock fixtures) fall through to `all`.
+ */
+type TimeRange = 'all' | '24h' | '7d' | '30d';
+
+const TIME_RANGE_OPTIONS: ReadonlyArray<{ id: TimeRange; label: string; windowMs: number | null }> = [
+  { id: 'all', label: 'All time',     windowMs: null },
+  { id: '24h', label: 'Last 24 hours', windowMs: 24 * 60 * 60 * 1000 },
+  { id: '7d',  label: 'Last 7 days',   windowMs: 7  * 24 * 60 * 60 * 1000 },
+  { id: '30d', label: 'Last 30 days',  windowMs: 30 * 24 * 60 * 60 * 1000 },
+];
+
 export function AssetBrowser() {
   const tab = useUIStore((s) => s.assetTab);
   const setTab = useUIStore((s) => s.setAssetTab);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortMode>('recent');
+  const [timeRange, setTimeRange] = useState<TimeRange>('all');
 
-  const workspaceId = useProjectStore((s) => s.project?.workspace ?? null);
+  const workspaceId = useProjectStore((s) => s.currentWorkspaceId);
+  const { canUpload } = usePermissions();
   const upload = useAssetUpload(workspaceId);
   const { loading, error } = useAssetsHydration(workspaceId);
   const items = useAssetsStore((s) => s.items);
@@ -57,8 +75,8 @@ export function AssetBrowser() {
   );
 
   const visible = useMemo(
-    () => sortAssets(filterAssets(items, tab, query), sort),
-    [items, tab, query, sort],
+    () => sortAssets(filterAssets(items, tab, query, timeRange), sort),
+    [items, tab, query, sort, timeRange],
   );
   const inProgress = visible.filter((a) => a.status !== 'ready');
   const ready = visible.filter((a) => a.status === 'ready');
@@ -67,7 +85,12 @@ export function AssetBrowser() {
     <div className="flex h-full min-h-0 flex-col">
       <PanelHead
         title="Assets"
-        tools={<SortMenu value={sort} onChange={setSort} />}
+        tools={
+          <div className="flex items-center gap-1">
+            <TimeFilterMenu value={timeRange} onChange={setTimeRange} />
+            <SortMenu value={sort} onChange={setSort} />
+          </div>
+        }
       />
 
       {/* Tabs */}
@@ -112,9 +135,12 @@ export function AssetBrowser() {
         </div>
         <button
           type="button"
-          title={upload.state.uploading ? `Uploading… ${Math.round(upload.state.progress * 100)}%` : 'Upload'}
+          title={
+            !canUpload ? 'Viewer role — upload not allowed' :
+            upload.state.uploading ? `Uploading… ${Math.round(upload.state.progress * 100)}%` : 'Upload'
+          }
           onClick={upload.openPicker}
-          disabled={upload.state.uploading || !workspaceId}
+          disabled={!canUpload || upload.state.uploading || !workspaceId}
           className={cn(
             'grid h-7 w-7 place-items-center rounded-md border border-dashed border-line bg-surface-2',
             'text-text-2 hover:border-accent hover:text-accent disabled:opacity-50',
@@ -159,7 +185,11 @@ export function AssetBrowser() {
         )}
         {!loading && visible.length === 0 && (
           <div className="px-2 py-8 text-center text-[11px] text-text-4">
-            {query ? `No assets match “${query}”.` : 'No assets yet — upload one to start.'}
+            {query
+              ? `No assets match “${query}”.`
+              : timeRange !== 'all'
+                ? `No assets uploaded in the ${TIME_RANGE_OPTIONS.find((o) => o.id === timeRange)?.label.toLowerCase()}.`
+                : 'No assets yet — upload one to start.'}
           </div>
         )}
       </div>
@@ -237,14 +267,106 @@ function SortMenu({ value, onChange }: SortMenuProps) {
   );
 }
 
+interface TimeFilterMenuProps {
+  value: TimeRange;
+  onChange: (range: TimeRange) => void;
+}
+
+function TimeFilterMenu({ value, onChange }: TimeFilterMenuProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const current = TIME_RANGE_OPTIONS.find((o) => o.id === value) ?? TIME_RANGE_OPTIONS[0]!;
+  const isFiltered = value !== 'all';
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        title={`Filter by upload time · currently: ${current.label}`}
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          'flex h-6 items-center gap-1 rounded px-1.5 text-[10px]',
+          isFiltered
+            ? 'bg-accent/15 text-accent hover:bg-accent/25'
+            : 'text-text-3 hover:bg-surface-3 hover:text-text-1',
+          open && !isFiltered && 'bg-surface-3 text-text-1',
+        )}
+      >
+        <CalendarIcon size={11} />
+        {isFiltered && <span className="font-medium">{shortLabel(value)}</span>}
+        <ChevronDownIcon size={9} />
+      </button>
+      {open && (
+        <div
+          className={cn(
+            'absolute right-0 top-7 z-30 w-40 overflow-hidden rounded-md border border-line',
+            'bg-surface-2 py-1 shadow-lg',
+          )}
+        >
+          {TIME_RANGE_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => {
+                onChange(opt.id);
+                setOpen(false);
+              }}
+              className={cn(
+                'flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px]',
+                value === opt.id ? 'text-accent' : 'text-text-2 hover:bg-surface-3 hover:text-text-1',
+              )}
+            >
+              {opt.label}
+              {value === opt.id && <span className="text-accent">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function shortLabel(range: TimeRange): string {
+  switch (range) {
+    case '24h': return '24h';
+    case '7d':  return '7d';
+    case '30d': return '30d';
+    default:    return '';
+  }
+}
+
 function filterAssets(
   all: readonly Asset[],
   tab: AssetTab,
   query: string,
+  timeRange: TimeRange,
 ): readonly Asset[] {
   let out: readonly Asset[] = tab === 'all' ? all : all.filter((a) => a.type === tab);
   const q = query.trim().toLowerCase();
   if (q) out = out.filter((a) => a.name.toLowerCase().includes(q));
+
+  // Time-range filter — assets without a createdAt (mock data) are kept
+  // visible so the local fixture still renders during offline dev.
+  const windowMs = TIME_RANGE_OPTIONS.find((o) => o.id === timeRange)?.windowMs;
+  if (windowMs != null) {
+    const cutoff = Date.now() - windowMs;
+    out = out.filter((a) => {
+      if (!a.createdAt) return true;
+      const t = Date.parse(a.createdAt);
+      return Number.isFinite(t) && t >= cutoff;
+    });
+  }
+
   return out;
 }
 

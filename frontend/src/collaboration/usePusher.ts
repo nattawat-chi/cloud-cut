@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type Pusher from 'pusher-js';
 
-import { disconnectPusher, getPusher, isPusherEnabled } from '@/services/pusher';
+import { getPusher, isPusherEnabled } from '@/services/pusher';
 
 export type PusherConnectionState =
   | 'disabled'        // VITE_PUSHER_KEY not set
@@ -55,8 +55,6 @@ export function usePusher(): UsePusherResult {
 
     return () => {
       instance.connection.unbind('state_change', onStateChange);
-      disconnectPusher();
-      pusherRef.current = null;
     };
   }, []);
 

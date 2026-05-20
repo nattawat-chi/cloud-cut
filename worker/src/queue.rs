@@ -89,7 +89,7 @@ async fn read_and_process(ctx: Arc<ConsumerContext>) -> Result<(), WorkerError> 
         let msg_id2 = msg_id.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = processor::dispatch(&stream2, &fields, &ctx2.db, &ctx2.config, &ctx2.s3).await {
+            if let Err(e) = processor::dispatch(&stream2, &fields, &ctx2.db, &ctx2.config, &ctx2.s3, &ctx2.redis).await {
                 tracing::error!(stream=%stream2, msg_id=%msg_id2, error=%e, "job failed");
                 let _ = maybe_dead_letter(&ctx2, &stream2, &msg_id2, &e).await;
             } else {

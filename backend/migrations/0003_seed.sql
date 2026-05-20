@@ -10,9 +10,15 @@
 
 -- ─── Users ────────────────────────────────────────────────────────────────────
 
--- Both seed accounts share the password "password123". The hash below was
+-- All seed accounts share the password "password123". The hash below was
 -- produced by `cargo run -p backend --example gen_hash -- password123` so it
 -- verifies against the real Argon2id verifier in auth/handlers.rs.
+--
+-- Role matrix (§2.6):
+--   alice  → owner   — full access
+--   mira   → admin   — full access, can invite/manage members
+--   carlos → editor  — can edit timeline, upload, export; cannot invite/manage
+--   sofia  → viewer  — read-only
 INSERT INTO users (id, email, password_hash, display_name, avatar_url) VALUES
 (
   '00000000-0000-0000-0000-000000000001',
@@ -27,6 +33,20 @@ INSERT INTO users (id, email, password_hash, display_name, avatar_url) VALUES
   '$argon2id$v=19$m=19456,t=2,p=1$rjiy0AsmSYidiTnvGd77Zw$9ftmhIrEjSKniTzQC5mXx4h6xtxo09INEhKSn8EsvzE',
   'Mira Santos',
   'https://api.dicebear.com/8.x/avataaars/svg?seed=mira'
+),
+(
+  '00000000-0000-0000-0000-000000000003',
+  'carlos@cloudcut.dev',
+  '$argon2id$v=19$m=19456,t=2,p=1$rjiy0AsmSYidiTnvGd77Zw$9ftmhIrEjSKniTzQC5mXx4h6xtxo09INEhKSn8EsvzE',
+  'Carlos Rivera',
+  'https://api.dicebear.com/8.x/avataaars/svg?seed=carlos'
+),
+(
+  '00000000-0000-0000-0000-000000000004',
+  'sofia@cloudcut.dev',
+  '$argon2id$v=19$m=19456,t=2,p=1$rjiy0AsmSYidiTnvGd77Zw$9ftmhIrEjSKniTzQC5mXx4h6xtxo09INEhKSn8EsvzE',
+  'Sofia Kim',
+  'https://api.dicebear.com/8.x/avataaars/svg?seed=sofia'
 );
 
 -- ─── Workspace ────────────────────────────────────────────────────────────────
@@ -40,7 +60,9 @@ INSERT INTO workspaces (id, name, owner_id, plan) VALUES (
 
 INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
   ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000001', 'owner'),
-  ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000002', 'editor');
+  ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000002', 'admin'),
+  ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000003', 'editor'),
+  ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000004', 'viewer');
 
 -- ─── Project ──────────────────────────────────────────────────────────────────
 

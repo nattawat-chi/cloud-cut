@@ -8,6 +8,7 @@ import type { ClipEffect, UUID } from '@/types';
 interface EffectEditorProps {
   clipId: UUID;
   fx: ClipEffect;
+  readOnly?: boolean;
 }
 
 /**
@@ -15,7 +16,7 @@ interface EffectEditorProps {
  * remove button. All three actions hit the projectStore directly so the
  * player's CSS-filter preview updates immediately.
  */
-export function EffectEditor({ clipId, fx }: EffectEditorProps) {
+export function EffectEditor({ clipId, fx, readOnly = false }: EffectEditorProps) {
   const toggleEffect = useProjectStore((s) => s.toggleEffect);
   const updateEffect = useProjectStore((s) => s.updateEffect);
   const removeEffect = useProjectStore((s) => s.removeEffect);
@@ -34,10 +35,12 @@ export function EffectEditor({ clipId, fx }: EffectEditorProps) {
             type="button"
             role="switch"
             aria-checked={fx.enabled}
-            onClick={() => toggleEffect(clipId, fx.id)}
+            disabled={readOnly}
+            onClick={() => !readOnly && toggleEffect(clipId, fx.id)}
             className={cn(
-              'relative h-3.5 w-6 shrink-0 cursor-pointer rounded-full transition-colors',
+              'relative h-3.5 w-6 shrink-0 rounded-full transition-colors',
               fx.enabled ? 'bg-accent' : 'bg-surface-3',
+              readOnly ? 'cursor-default' : 'cursor-pointer',
             )}
           >
             <span
@@ -49,14 +52,16 @@ export function EffectEditor({ clipId, fx }: EffectEditorProps) {
           </button>
           {meta.label}
         </div>
-        <button
-          type="button"
-          title="Remove"
-          onClick={() => removeEffect(clipId, fx.id)}
-          className="grid h-5 w-5 place-items-center rounded text-text-3 hover:bg-surface-3 hover:text-text-1"
-        >
-          <Trash2Icon size={11} />
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            title="Remove"
+            onClick={() => removeEffect(clipId, fx.id)}
+            className="grid h-5 w-5 place-items-center rounded text-text-3 hover:bg-surface-3 hover:text-text-1"
+          >
+            <Trash2Icon size={11} />
+          </button>
+        )}
       </div>
 
       <div className="grid items-center gap-2" style={{ gridTemplateColumns: '1fr 46px' }}>
@@ -66,9 +71,12 @@ export function EffectEditor({ clipId, fx }: EffectEditorProps) {
           max={meta.max}
           step={meta.step}
           value={fx.value}
-          disabled={!fx.enabled}
-          onChange={(e) => updateEffect(clipId, fx.id, parseFloat(e.target.value))}
-          className="cc-insp-slider h-1 w-full cursor-pointer appearance-none rounded-sm bg-surface-3"
+          disabled={!fx.enabled || readOnly}
+          onChange={(e) => !readOnly && updateEffect(clipId, fx.id, parseFloat(e.target.value))}
+          className={cn(
+            'cc-insp-slider h-1 w-full appearance-none rounded-sm bg-surface-3',
+            readOnly ? 'cursor-default' : 'cursor-pointer',
+          )}
         />
         <div className="font-mono text-right text-[11px] text-text-1">{meta.fmt(fx.value)}</div>
       </div>

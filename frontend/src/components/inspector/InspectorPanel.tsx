@@ -1,8 +1,9 @@
-import { LayersIcon, MousePointerIcon } from 'lucide-react';
+import { EyeIcon, LayersIcon, MousePointerIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { PanelHead } from '@/components/shared/PanelHead';
 import { MOCK_ASSET_INDEX as MOCK_ASSET_INDEX_FALLBACK } from '@/mocks/cloudcut';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAssetsStore } from '@/state/assetsStore';
 import {
   selectClipById,
@@ -35,6 +36,8 @@ export function InspectorPanel() {
   const selectedIds = useUIStore((s) => s.selectedClipIds);
   const tab = useUIStore((s) => s.inspectorTab);
   const setTab = useUIStore((s) => s.setInspectorTab);
+  const { canEditTimeline } = usePermissions();
+  const readOnly = !canEditTimeline;
 
   const firstId = selectedIds[0];
   const clip = useProjectStore((s) =>
@@ -81,7 +84,7 @@ export function InspectorPanel() {
       <PanelHead title="Inspector" />
 
       {/* Tabs */}
-      <div className="flex border-b border-line px-2">
+      <div className="flex items-center border-b border-line px-2">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -101,10 +104,16 @@ export function InspectorPanel() {
             {t.label}
           </button>
         ))}
+        {readOnly && (
+          <span className="ml-auto flex items-center gap-1 rounded-sm bg-surface-3 px-1.5 py-0.5 text-[9px] text-text-4">
+            <EyeIcon size={9} />
+            View only
+          </span>
+        )}
       </div>
 
-      {tab === 'props' && <ClipInfo clip={clip} asset={asset} />}
-      {tab === 'effects' && <EffectsTab clip={clip} />}
+      {tab === 'props' && <ClipInfo clip={clip} asset={asset} readOnly={readOnly} />}
+      {tab === 'effects' && <EffectsTab clip={clip} readOnly={readOnly} />}
       {tab === 'audio' && null}
     </div>
   );

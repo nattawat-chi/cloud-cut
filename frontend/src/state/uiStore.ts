@@ -68,9 +68,13 @@ export interface UIState {
   showEffectsBrowser: boolean;
   showHistoryPanel: boolean;
   showExportDialog: boolean;
+  showMembersPanel: boolean;
+  showProjectSettings: boolean;
 
   // ── Actions ───────────────────────────────────────────────────────────────
   selectClip: (id: UUID, additive?: boolean) => void;
+  /** Replace the selection with the given clip IDs (used after paste). */
+  setSelection: (ids: readonly UUID[]) => void;
   deselectAll: () => void;
 
   setTool: (t: Tool) => void;
@@ -95,6 +99,8 @@ export interface UIState {
   toggleExportDialog: () => void;
   toggleEffectsBrowser: () => void;
   toggleHistoryPanel: () => void;
+  toggleMembersPanel: () => void;
+  toggleProjectSettings: () => void;
 }
 
 const initialTheme = readInitialTheme();
@@ -123,6 +129,8 @@ export const useUIStore = create<UIState>()((set) => ({
   showExportDialog: false,
   showEffectsBrowser: false,
   showHistoryPanel: false,
+  showMembersPanel: false,
+  showProjectSettings: false,
 
   // ── Selection ───────────────────────────────────────────────────────────
   selectClip: (id, additive = false) =>
@@ -133,6 +141,7 @@ export const useUIStore = create<UIState>()((set) => ({
       else sel.add(id);
       return { selectedClipIds: [...sel] };
     }),
+  setSelection: (ids) => set({ selectedClipIds: [...ids] }),
   deselectAll: () => set({ selectedClipIds: [] }),
 
   // ── Tools + viewport ─────────────────────────────────────────────────────
@@ -170,4 +179,6 @@ export const useUIStore = create<UIState>()((set) => ({
   toggleExportDialog: () => set((s) => ({ showExportDialog: !s.showExportDialog })),
   toggleEffectsBrowser: () => set((s) => ({ showEffectsBrowser: !s.showEffectsBrowser })),
   toggleHistoryPanel: () => set((s) => ({ showHistoryPanel: !s.showHistoryPanel })),
+  toggleMembersPanel: () => set((s) => ({ showMembersPanel: !s.showMembersPanel })),
+  toggleProjectSettings: () => set((s) => ({ showProjectSettings: !s.showProjectSettings })),
 }));

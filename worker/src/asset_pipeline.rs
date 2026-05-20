@@ -154,12 +154,23 @@ async fn process_audio(
     tmp: &std::path::Path,
 ) -> Result<(), WorkerError> {
     let asset_id = asset_id_str.parse::<Uuid>().unwrap();
+
+    // Normalised AAC proxy — browser-safe, consistent bitrate regardless of
+    // original format (wav/ogg/flac/etc.). Frontend falls back to the original
+    // file for assets processed before this code landed.
+    let proxy_path = tmp.join("proxy.mp4");
+    ffmpeg::make_audio_proxy(original, &proxy_path).await?;
+    let proxy_key = format!("variants/{asset_id_str}/proxy.mp4");
+    storage::upload_file(s3_client, &config.s3_bucket, &proxy_key, &proxy_path, "audio/mp4").await?;
+    upsert_variant(db, asset_id, "proxy", &proxy_key, "audio/mp4", &proxy_path).await?;
+
     let waveform_path = tmp.join("waveform.json");
     ffmpeg::make_waveform(original, &waveform_path).await?;
     let wf_key = format!("variants/{asset_id_str}/waveform.json");
     storage::upload_file(s3_client, &config.s3_bucket, &wf_key, &waveform_path, "application/json")
         .await?;
     upsert_variant(db, asset_id, "waveform", &wf_key, "application/json", &waveform_path).await?;
+
     Ok(())
 }
 

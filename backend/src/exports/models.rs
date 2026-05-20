@@ -18,6 +18,12 @@ pub struct ExportJobRow {
     pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    /// Presigned GET URL for the rendered file. Populated by handlers when
+    /// `status = "done"`; null otherwise. Not stored in the DB — generated
+    /// on read so the URL stays within its presign expiry window.
+    #[sqlx(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]

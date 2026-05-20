@@ -38,6 +38,13 @@ users ─┐
 
 ## Design decisions (§1.4 questions)
 
+> **Why SQLx (and not SeaORM / Diesel / raw `tokio-postgres`)?**
+> Answered in [`backend/DESIGN.md` § Q2](../backend/DESIGN.md). Short version:
+> compile-time-checked SQL via `query!` macro, no ORM impedance mismatch when
+> the schema uses Postgres-specific features (enums, partitioned tables, JSONB
+> path ops), and async-native against `tokio-postgres`. Migrations stay raw
+> SQL (no DSL), which keeps DBA reviewers happy.
+
 ### Q1 — Why UUID primary keys instead of BIGSERIAL?
 
 UUIDs (`gen_random_uuid()` via pgcrypto) are generated client-side or at the API
@@ -141,6 +148,81 @@ exports/{project_id}/{export_job_id}/output.{mp4|webm|mov}
 - MinIO bucket policy: `variants/*` has anonymous read (presigned not required for
   proxies); `originals/*` and `exports/*` require signed URLs (15-min expiry).
 
+### Q-CLIP-POS — Why store clip position as `pos_ms` (millisecond integer)?
+
+Clip start/end times on the timeline are stored as `BIGINT` milliseconds rather
+than:
+
+- **`INTERVAL` / `TIME`** — Postgres `INTERVAL` is 16 bytes (vs 8 for BIGINT)
+  and arithmetic over millions of clips during snapshot loading would dominate
+  CPU. `TIME` is wall-clock semantics — wrong fit for a relative offset.
+- **Floating-point seconds** — frame-accurate timelines need *exact* integer
+  arithmetic. Adding 33.333…ms (30 fps) hundreds of times accumulates float
+  error; a clip starting at "frame 1800" must equal "60.000s", not "59.9997s",
+  or the ffmpeg trim filter cuts on the wrong frame.
+- **Frame numbers** — couples the schema to a single fps. A clip at "frame 1800"
+  on a 30 fps timeline doesn't translate cleanly if the user changes the
+  project FPS to 60 (an offered feature). Milliseconds are fps-independent.
+
+`BIGINT` ms gives 292 million years of range — overkill but cheap. The same
+unit appears in `dur_ms`, `trim_in_ms`, `tracks.position` (track-stack order is
+a separate `INTEGER` though), and the API DTOs, so no conversions happen between
+layers. The frontend's `pxToMs(px, zoom)` is the only place the conversion lives.
+
+### Q-CASCADE — Cascade cleanup details
+
+The hierarchy `workspaces → projects → tracks → clips → clip_effects` uses
+`ON DELETE CASCADE` end-to-end so a single `DELETE FROM workspaces WHERE id=…`
+removes the entire tree in one statement. Specific edges:
+
+| Parent → Child | Action | Why |
+|---|---|---|
+| `workspaces` → `projects` | CASCADE | Workspace removal wipes all owned projects + their tree |
+| `projects` → `tracks` / `assets` / `export_jobs` | CASCADE | Project deletion is total |
+| `tracks` → `clips` | CASCADE | Track removal drops every clip on it |
+| `clips` → `clip_effects` / `transitions` | CASCADE | Effects/transitions can't outlive their host clip |
+| `assets` → `asset_variants` | CASCADE | Variants are derived data |
+| `clips` → `assets` (FK) | **RESTRICT** | Block asset deletion while clips still reference it — returns 409 from the API. Caller must remove the clips first |
+| `users` → `workspace_members` / `refresh_tokens` | CASCADE | User wipe = full account delete |
+| `users` → `assets.uploaded_by` | SET NULL | Orphaned assets survive (workspace billing already paid) |
+| `users` → `operation_logs.actor_id` | SET NULL | Audit log keeps the history; actor becomes `null` |
+| `operation_logs` → parent table FK | **omitted** | Cross-partition FKs scan every partition. Referential integrity enforced in the Axum handlers via row-level checks before insert |
+
+S3 objects under `originals/{workspace_id}/…` and `variants/{asset_id}/…` are
+**not** removed by the DB cascade — a janitor job (out of scope for this
+prototype, sketched in `worker/DESIGN.md`) sweeps orphans on a schedule.
+
+### Q-CONCURRENT — Handling concurrent timeline updates
+
+The schema combines three mechanisms instead of pessimistic locking:
+
+1. **Per-clip `version` BIGINT column** — incremented on every UPDATE via the
+   handler. Conditional updates use `WHERE id=$1 AND version=$current` so a
+   stale write returns 0 rows affected → backend retries with the fresh row.
+   This is **optimistic concurrency control** (OCC), no row locks.
+2. **Operation-log append** — every mutation is also written to
+   `operation_logs(project_id, seq, op_kind, before, after, actor_id, applied_at)`.
+   The `seq` is monotonic per project via a Postgres sequence. Reconciling a
+   late reconnect = "give me ops where `seq > my_last_seen` ordered by `seq`".
+3. **Pusher broadcast** — the canonical state is the DB. The Pusher event is a
+   *hint* that lets connected clients apply ops instantly without polling. If
+   a client misses an event (network blip), the next API call returns rows
+   with newer `version`s and the client reconciles.
+
+Why this is enough for a video editor (and not for a text editor):
+
+- Edit *granularity* is large (one clip per op), not character-by-character.
+- True simultaneous conflict on the *same clip* is rare (one user usually drags
+  one clip at a time). The frontend renders a "being edited" indicator using
+  presence cursors to nudge users away from collisions.
+- When conflicts do happen, **last-writer-wins on a per-clip basis** matches
+  user expectation from desktop NLEs like Premiere — the more recent move sticks.
+
+Trade-off accepted: no fine-grained merge of partial edits to the same clip
+(e.g. one user trims left while another trims right at the same instant — the
+second write overwrites the first). Spec §4.8 Q7 explains why a full CRDT was
+out of scope.
+
 ### Q8 — Collaboration: operation-log append vs CRDT vs OT
 
 We chose an **operation-log append** model rather than a full CRDT or OT system:
@@ -157,6 +239,42 @@ We chose an **operation-log append** model rather than a full CRDT or OT system:
   clients re-fetch ops since their last known `id` and replay. Conflicts are rare
   (video editing is not free-text); when they occur, last-writer-wins on a per-clip
   basis is acceptable and matches user expectations from NLE tools like Premiere.
+
+---
+
+## Row estimate — `1,000 users × 10 projects × 30 clips` (spec §1.4 Q7)
+
+The brief asks for an explicit sizing at this scale. Plugging the numbers into
+the schema:
+
+| Table | Formula | Rows |
+|---|---|---|
+| `users` | 1,000 | **1,000** |
+| `workspaces` | ~1 / user (some shared) | **~1,000** |
+| `workspace_members` | 1.5 / workspace (1 owner + occasional collab) | **~1,500** |
+| `projects` | 1,000 × 10 | **10,000** |
+| `tracks` | 4 / project (default V1, V2, A1, A2) | **40,000** |
+| `clips` | 1,000 × 10 × 30 | **300,000** |
+| `clip_effects` | ~2 per clip (avg) | **~600,000** |
+| `assets` | ~50 / user (uploads outlive clips) | **~50,000** |
+| `asset_variants` | 3 / asset (proxy + thumb + waveform) | **~150,000** |
+| `export_jobs` | ~5 / project lifetime | **~50,000** |
+| `operation_logs` | ~50 ops / clip lifetime | **~15,000,000** |
+| `refresh_tokens` | ~3 active / user | **~3,000** |
+
+**Hot table is `operation_logs`** at ~15 M rows — well within Postgres comfort
+once partitioned (~1.25 M / month at 12-month retention). All other tables fit
+comfortably in RAM cache on a 16 GB server.
+
+**Disk estimate at this scale:**
+- Postgres rows: ~3 GB (incl. indexes)
+- Originals in S3: ~50 k × 800 MB ≈ **40 TB** (dominant cost)
+- Proxies + thumbs + waveforms: ~5 TB
+- Exports: ~10 TB
+
+Postgres is comfortable to **10×** this scale (≈ 150 M operation_logs) on a
+single primary; the partitioned schema means archival ≥ 12 mo old to cold
+storage is a `DETACH PARTITION` away.
 
 ---
 

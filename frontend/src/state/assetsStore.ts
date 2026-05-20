@@ -142,9 +142,17 @@ export function toAsset(r: AssetResponse): Asset {
     status: r.status as AssetStatus,
     progress,
     thumb: ready ? `${base}/thumbnail.jpg` : undefined,
-    // Worker generates proxy.mp4 only for video assets — see
-    // worker/src/jobs/process_asset.rs::process_video.
-    proxyUrl: ready && type === 'video' ? `${base}/proxy.mp4` : undefined,
+    // Video: worker generates proxy.mp4 (transcoded 720p H.264).
+    // Audio: worker only generates waveform.json, no proxy — use the
+    // original file directly. Browsers support mp3/aac/wav/ogg natively.
+    proxyUrl: ready
+      ? type === 'video'
+        ? `${base}/proxy.mp4`
+        : type === 'audio'
+          ? `${S3_PUBLIC_BASE}/${r.original_key}`
+          : undefined
+      : undefined,
+    createdAt: r.created_at,
   };
 }
 
