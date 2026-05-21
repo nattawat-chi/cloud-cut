@@ -13,6 +13,7 @@ use crate::{
     error::AppError,
     projects::models::{CreateProjectReq, ListQuery, PagedProjects, ProjectRow, UpdateProjectReq},
     state::AppState,
+    timeline::models::{ClipRow, TrackRow},
     workspaces::authz::{require_workspace_role, Role},
 };
 
@@ -263,11 +264,15 @@ pub async fn duplicate_project(
     .await?;
 
     // ── 2. Copy tracks, keeping a map old_id → new_id ────────────────────────
-    let src_tracks = sqlx::query!(
-        "SELECT id, kind::text AS kind, name, position, muted, locked
+    // Use the runtime-checked `query_as::<_, TrackRow>` instead of `query!()`
+    // — the macro version connects to the DB at *compile time* to verify
+    // SQL, which breaks fresh clones whose DB has no schema yet (the
+    // auto-migration in main.rs runs at *runtime*, after compile).
+    let src_tracks = sqlx::query_as::<_, TrackRow>(
+        "SELECT id, project_id, kind::text AS kind, name, position, muted, locked, created_at
          FROM tracks WHERE project_id = $1 ORDER BY position",
-        project_id
     )
+    .bind(project_id)
     .fetch_all(&mut *tx)
     .await?;
 
@@ -289,12 +294,12 @@ pub async fn duplicate_project(
         .await?;
 
         // ── 3. Copy clips for this track ────────────────────────────────────
-        let src_clips = sqlx::query!(
-            "SELECT id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms,
-                    speed::float8 AS speed, name
+        let src_clips = sqlx::query_as::<_, ClipRow>(
+            "SELECT id, track_id, asset_id, pos_ms, dur_ms, trim_in_ms, trim_out_ms,
+                    speed::float8 AS speed, name, version, created_at, updated_at
              FROM clips WHERE track_id = $1",
-            track.id
         )
+        .bind(track.id)
         .fetch_all(&mut *tx)
         .await?;
 
