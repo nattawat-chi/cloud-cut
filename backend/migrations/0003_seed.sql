@@ -1,12 +1,16 @@
 -- CloudCut — development seed data
--- Inserts one workspace, two users, and a sample project so the dev
--- environment has a working login immediately after `docker compose up`.
+-- Inserts demo users, workspace, projects, clips, effects, export jobs
+-- and operation logs so a fresh clone can log in + see a populated editor
+-- immediately. Backend auto-applies all migrations at startup (see
+-- backend/src/main.rs::sqlx::migrate!), so no separate seed step needed.
 --
 -- Passwords are Argon2id hashes of the plaintext shown in comments.
 -- Re-generate with: echo -n "password" | argon2 salt -id -t 2 -m 15 -p 1
 --
--- WARNING: never run this migration in production (gated by SEED_DATA env-var
--- check in the migration runner wrapper).
+-- WARNING (production): the hard-coded UUIDs and "password123" credentials
+-- below are intended for local development only. Before deploying to prod,
+-- remove this file from the migrations/ directory (or split it into a
+-- separate seed pipeline triggered by a SEED_DATA=true env var).
 
 -- ─── Users ────────────────────────────────────────────────────────────────────
 

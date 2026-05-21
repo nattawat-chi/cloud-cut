@@ -75,23 +75,27 @@ docker compose up -d
 docker compose ps
 #   → all services should be `healthy` (minio-setup will exit 0 after seeding)
 
-# 4. Apply database migrations (creates tables + seeds demo data)
-cargo install sqlx-cli --no-default-features --features postgres   # one-time
-sqlx migrate run --source backend/migrations \
-                 --database-url postgresql://cloudcut:cloudcut_dev@localhost:5432/cloudcut
-
-# 5. Run the backend in one terminal (Rule 2)
+# 4. Run the backend in one terminal (Rule 2)
+#    → auto-applies all migrations + seed on first boot via sqlx::migrate!()
 cargo run -p backend
 
-# 6. Run the worker in another terminal (Rule 3)
+# 5. Run the worker in another terminal (Rule 3)
 cargo run -p worker
 
-# 7. Run the frontend in a third terminal
+# 6. Run the frontend in a third terminal
 cd frontend && pnpm install && pnpm dev
 #   → http://localhost:5173
+
+# 7. Log in with one of the seeded demo accounts (all share password "password123"):
+#      alice@cloudcut.dev   — owner
+#      mira@cloudcut.dev    — admin
+#      carlos@cloudcut.dev  — editor
+#      sofia@cloudcut.dev   — viewer
 ```
 
-> Migrations are also auto-applied at backend startup via `sqlx::migrate!()` — step 4 is only needed for standalone setups (CI, fresh clones without the backend running).
+> **Migrations** run automatically at backend startup. You only need the
+> standalone CLI flow (`cargo install sqlx-cli` + `sqlx migrate run`) for
+> CI, revert, or DB-only work — see [Database migrations](#database-migrations).
 
 ### Service URLs (host-side)
 
