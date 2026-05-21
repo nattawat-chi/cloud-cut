@@ -45,6 +45,16 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(config).await?;
     info!("database connected ✓");
 
+    // Apply pending migrations on every boot. `sqlx::migrate!` reads the
+    // `migrations/` directory at compile time, so freshly-cloned setups don't
+    // need a separate `sqlx migrate run` step before login works — the seed
+    // migration creates the demo users and the editor is usable on first
+    // boot. Already-applied migrations are tracked in `_sqlx_migrations`
+    // and skipped, so this is a no-op on subsequent runs.
+    info!("applying migrations…");
+    sqlx::migrate!("./migrations").run(&state.db).await?;
+    info!("migrations up-to-date ✓");
+
     let router = app::build_router(state);
 
     info!("CloudCut backend listening on http://{addr}");
