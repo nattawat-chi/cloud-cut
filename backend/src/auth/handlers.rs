@@ -64,7 +64,11 @@ pub async fn register(
     .fetch_one(&state.db)
     .await
     .map_err(|e| match &e {
-        sqlx::Error::Database(dbe) if dbe.constraint() == Some("users_email_key") => {
+        // Check by Postgres SQLSTATE (23505 = unique_violation) instead of the
+        // constraint name — Postgres auto-generates `users_email_key` from the
+        // UNIQUE column but the exact name can drift on schema changes or
+        // sqlx versions. SQLSTATE is the spec-defined contract.
+        sqlx::Error::Database(dbe) if dbe.code().as_deref() == Some("23505") => {
             AppError::Conflict("email already registered".into())
         }
         _ => e.into(),
