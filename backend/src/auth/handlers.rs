@@ -50,6 +50,15 @@ pub async fn register(
         .to_string();
 
     let user_id = Uuid::new_v4();
+
+    // Wrap user creation + auto-provisioning (workspace + membership +
+    // starter project + default tracks) in one transaction. Without this,
+    // a partial failure could leave the new user "half-set-up" (user row
+    // exists, no workspace) → next login would land them in the same
+    // "You have no workspaces yet" bootstrap error the auto-provision is
+    // meant to prevent.
+    let mut tx = state.db.begin().await?;
+
     let row = sqlx::query_as::<_, UserRow>(
         r#"
         INSERT INTO users (id, email, password_hash, display_name)
@@ -61,7 +70,7 @@ pub async fn register(
     .bind(&req.email)
     .bind(&hash)
     .bind(&req.display_name)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| match &e {
         // Check by Postgres SQLSTATE (23505 = unique_violation) instead of the
@@ -73,6 +82,64 @@ pub async fn register(
         }
         _ => e.into(),
     })?;
+
+    // ── Auto-provision: workspace + membership + starter project + tracks ──
+    // Without these, App.tsx's bootstrap throws "You have no workspaces yet"
+    // and falls back to mock data — the user signs up and immediately sees
+    // someone else's demo project. Provisioning here makes the editor usable
+    // on the very next request.
+    let workspace_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO workspaces (name, owner_id, plan)
+           VALUES ($1, $2, 'free'::plan_tier)
+           RETURNING id"#,
+    )
+    .bind(format!("{}'s Workspace", &req.display_name))
+    .bind(user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"INSERT INTO workspace_members (workspace_id, user_id, role)
+           VALUES ($1, $2, 'owner'::member_role)"#,
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Starter project: 30fps / 1080p — same defaults the in-app "New
+    // project" form picks. duration_ms=0 so the timeline starts empty;
+    // selectTotalDurationMs takes over once the user adds clips.
+    let project_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO projects
+             (workspace_id, name, description, fps, resolution_w, resolution_h, duration_ms, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(workspace_id)
+    .bind("My First Project")
+    .bind("")
+    .bind(30_i16)
+    .bind(1920_i32)
+    .bind(1080_i32)
+    .bind(0_i64)
+    .bind(user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Default V1 + A1 tracks so the user can drag assets onto them
+    // immediately — mirrors what the frontend's `createProject` action does
+    // for in-app project creation.
+    sqlx::query(
+        r#"INSERT INTO tracks (project_id, kind, name, position) VALUES
+             ($1, 'video'::track_kind, 'Video 1', 0),
+             ($1, 'audio'::track_kind, 'Audio 1', 1)"#,
+    )
+    .bind(project_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
 
     let (access_token, refresh_token) = issue_token_pair(&state, &row).await?;
     Ok((
